@@ -581,13 +581,13 @@ async def upload(bot: Client, m: Message):
 
             elif "https://appx-transcoded-videos.livelearn.in/videos/rozgar-data/" in url:
                 url = url.replace("https://appx-transcoded-videos.livelearn.in/videos/rozgar-data/", "")
-                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "@").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
+                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "@").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
                 name = f'{str(count).zfill(3)}) {name1[:60]}'
                 cmd = f'yt-dlp -o "{name}.mp4" "{url}"'
 
             elif "https://appx-transcoded-videos-mcdn.akamai.net.in/videos/bhainskipathshala-data/" in url:
                 url = url.replace("https://appx-transcoded-videos-mcdn.akamai.net.in/videos/bhainskipathshala-data/", "")
-                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "@").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
+                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "@").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
                 name = f'{str(count).zfill(3)}) {name1[:60]}'
                 cmd = f'yt-dlp -o "{name}.mp4" "{url}"'
 
@@ -615,7 +615,7 @@ async def upload(bot: Client, m: Message):
              #url = f"https://dl.alphacbse.site/download/{id}/master.m3u8"
 
 
-            name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
+            name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
             name = f'{str(count).zfill(3)}) {name1[:60]}'
 
             #if 'cpvod.testbook' in url:
