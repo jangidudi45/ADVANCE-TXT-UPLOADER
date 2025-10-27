@@ -548,14 +548,14 @@ async def upload(bot: Client, m: Message):
     print(f"📸 Thumbnail input received: {thumb}")
 
     if thumb.startswith("http://") or thumb.startswith("https://"):
-    # Keep URL as is - send_vid function will handle downloading
-    print(f"✅ Using custom thumbnail URL: {thumb}")
+        # Keep URL as is - send_vid function will handle downloading
+        print(f"✅ Using custom thumbnail URL: {thumb}")
     elif thumb.lower() == "no":
-    thumb = "no"
-    print("⚡ Using auto-generated thumbnail")
+        thumb = "no"
+        print("⚡ Using auto-generated thumbnail")
     else:
-    thumb = "no"
-    print("⚠️ Invalid input, using auto-generated thumbnail")
+        thumb = "no"
+        print("⚠️ Invalid input, using auto-generated thumbnail")
    
     failed_count =0
     if len(links) == 1:
