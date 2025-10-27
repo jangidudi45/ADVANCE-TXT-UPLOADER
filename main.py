@@ -543,12 +543,18 @@ async def upload(bot: Client, m: Message):
     await input6.delete(True)
     await editable.delete()
 
-    thumb = input6.text
+    thumb = input6.text.strip()  # Strip whitespace
+    print(f"Received thumbnail input: {thumb}")  # Debug logging
+
     if thumb.startswith("http://") or thumb.startswith("https://"):
-        getstatusoutput(f"wget '{thumb}' -O 'thumb.jpg'")
-        thumb = "thumb.jpg"
+    print(f"Using custom thumbnail URL: {thumb}")
+    # Keep the URL as is, send_vid will handle downloading
+    elif thumb.lower() == "no":
+    thumb = "no"
+    print("No custom thumbnail, will use auto-generated")
     else:
-        thumb = "no" # Corrected assignment
+    thumb = "no"
+    print("Invalid input, defaulting to auto-generated thumbnail")
    
     failed_count =0
     if len(links) == 1:
