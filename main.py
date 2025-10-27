@@ -575,16 +575,15 @@ async def upload(bot: Client, m: Message):
     
     pinned_msg = None
     try:
+        # Send the summary message
         pinned_msg = await m.reply_text(summary_text, disable_web_page_preview=True)
         
-        # Only pin in groups/channels, not in private chats
-        if m.chat.type in ["group", "supergroup", "channel"]:
-            await pinned_msg.pin(disable_notification=False)
-            logging.info(f"✅ Pinned summary message in chat {m.chat.id}")
-        else:
-            logging.info(f"ℹ️ Summary message sent (pinning disabled for private chats)")
+        # Pin the message (silently without notification spam)
+        await pinned_msg.pin(disable_notification=False)
+        
+        logging.info(f"✅ Pinned summary message in chat {m.chat.id}")
     except Exception as e:
-        logging.error(f"⚠️ Failed to send/pin message: {e}")
+        logging.error(f"⚠️ Failed to pin message: {e}")
         # Continue even if pinning fails
    
     failed_count =0
