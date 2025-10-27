@@ -200,7 +200,6 @@ def save_to_file(video_links, channel_name):
     return filename
 
 
-# ✅ Updated download_video with fallback if aria2c fails
 async def download_video(url, cmd, name):
     global failed_counter
 
@@ -218,6 +217,7 @@ async def download_video(url, cmd, name):
 
     return name
 
+
 async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
     time.sleep(1)
@@ -231,25 +231,79 @@ async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
+    # Generate auto thumbnail from video
     subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
     await prog.delete(True)
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
+    
+    # ✅ Enhanced thumbnail handling
+    thumbnail = f"{filename}.jpg"  # Default to auto-generated
+    downloaded_thumb = None
+    
     try:
-        thumbnail = f"{filename}.jpg" if thumb == "no" else thumb
+        if thumb != "no":
+            if thumb.startswith("http://") or thumb.startswith("https://"):
+                # Download thumbnail from URL
+                downloaded_thumb = "custom_thumb.jpg"
+                logging.info(f"Downloading thumbnail from: {thumb}")
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(thumb, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status == 200:
+                            async with aiofiles.open(downloaded_thumb, mode='wb') as f:
+                                await f.write(await resp.read())
+                            thumbnail = downloaded_thumb
+                            logging.info("Thumbnail downloaded successfully")
+                        else:
+                            logging.warning(f"Failed to download thumbnail: HTTP {resp.status}")
+            elif os.path.exists(thumb):
+                # Use local file if it exists
+                thumbnail = thumb
+            else:
+                logging.warning(f"Thumbnail path does not exist: {thumb}")
     except Exception as e:
-        await m.reply_text(str(e))
-        return
+        logging.error(f"Thumbnail error: {e}")
+        thumbnail = f"{filename}.jpg"  # Fallback to auto-generated
 
     dur = int(duration(filename))
     start_time = time.time()
 
     try:
-        await m.reply_video(filename, caption=cc, supports_streaming=True, height=720, width=1280,
-                            thumb=thumbnail, duration=dur,
-                            progress=progress_bar, progress_args=(reply, start_time))
-    except Exception:
-        await m.reply_document(filename, caption=cc, progress=progress_bar, progress_args=(reply, start_time))
+        await m.reply_video(
+            filename, 
+            caption=cc, 
+            supports_streaming=True, 
+            height=720, 
+            width=1280,
+            thumb=thumbnail, 
+            duration=dur,
+            progress=progress_bar, 
+            progress_args=(reply, start_time)
+        )
+        logging.info(f"Video uploaded successfully: {name}")
+    except Exception as e:
+        logging.error(f"Video upload failed: {e}, falling back to document")
+        try:
+            await m.reply_document(
+                filename, 
+                caption=cc, 
+                progress=progress_bar, 
+                progress_args=(reply, start_time)
+            )
+        except Exception as doc_error:
+            logging.error(f"Document upload also failed: {doc_error}")
+            await m.reply_text(f"❌ Upload failed for: {name}\nError: {str(doc_error)}")
 
-    os.remove(filename)
-    os.remove(f"{filename}.jpg")
+    # ✅ Cleanup all files
+    try:
+        if os.path.exists(filename):
+            os.remove(filename)
+        if os.path.exists(f"{filename}.jpg"):
+            os.remove(f"{filename}.jpg")
+        if downloaded_thumb and os.path.exists(downloaded_thumb):
+            os.remove(downloaded_thumb)
+            logging.info("Custom thumbnail cleaned up")
+    except Exception as e:
+        logging.error(f"Cleanup error: {e}")
+    
     await reply.delete(True)
