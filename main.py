@@ -556,6 +556,35 @@ async def upload(bot: Client, m: Message):
     else:
         thumb = "no"
         print("⚠️ Invalid input, using auto-generated thumbnail")
+
+    # ✅ CREATE AND PIN SUMMARY MESSAGE
+    summary_text = (
+       f"╭━━━━━━━━━━━━━━━━━╮\n"
+        f"┃  📊 **BATCH INFO** 📊  ┃\n"
+        f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+        f"**Batch Name:** `{b_name}`\n"
+        f"**Quality:** `{raw_text2}p`\n"
+        f"**Total Links:** `{len(links)}`\n\n"
+        f"├ 🎞️ Videos: `{video_count}`\n"
+        f"├ 📕 PDFs: `{pdf_count}`\n"
+        f"├ 🖼️ Images: `{img_count}`\n"
+        f"├ 📂 Zips: `{zip_count}`\n\n"
+        f"**Status:** 🔄 Processing...\n\n"
+        f"⚡ Bot Made By Pikachu"
+    )
+    
+    pinned_msg = None
+    try:
+        # Send the summary message
+        pinned_msg = await m.reply_text(summary_text, disable_web_page_preview=True)
+        
+        # Pin the message (silently without notification spam)
+        await pinned_msg.pin(disable_notification=False)
+        
+        logging.info(f"✅ Pinned summary message in chat {m.chat.id}")
+    except Exception as e:
+        logging.error(f"⚠️ Failed to pin message: {e}")
+        # Continue even if pinning fails
    
     failed_count =0
     if len(links) == 1:
@@ -849,6 +878,30 @@ async def upload(bot: Client, m: Message):
 
     except Exception as e:
         await m.reply_text(e)
+
+    # ✅ UPDATE PINNED MESSAGE AFTER COMPLETION
+    if pinned_msg:
+        try:
+            completed_text = (
+                f"╭━━━━━━━━━━━━━━━━━╮\n"
+                f"┃  📊 **BATCH INFO** 📊  ┃\n"
+                f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                f"**Batch Name:** `{b_name}`\n"
+                f"**Quality:** `{raw_text2}p`\n"
+                f"**Total Links:** `{len(links)}`\n\n"
+                f"├ 🎞️ Videos: `{video_count}`\n"
+                f"├ 📕 PDFs: `{pdf_count}`\n"
+                f"├ 🖼️ Images: `{img_count}`\n"
+                f"├ 📂 Zips: `{zip_count}`\n"
+                f"├ ❌ Failed: `{failed_count}`\n\n"
+                f"**Status:** ✅ Completed!\n\n"
+                f"⚡ Bot Made By Pikachu"
+            )
+            await pinned_msg.edit_text(completed_text)
+            logging.info("✅ Updated pinned message with completion status")
+        except Exception as e:
+            logging.error(f"⚠️ Failed to update pinned message: {e}")
+    
     #await m.reply_text("**<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>**")
     await m.reply_text("<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>\n\n"
                        f"<b>📌 Bᴀᴛᴄʜ Nᴀᴍᴇ :</b> {b_name}\n\n"
