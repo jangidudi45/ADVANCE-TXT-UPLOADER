@@ -537,24 +537,25 @@ async def upload(bot: Client, m: Message):
 
 
 
-    await editable.edit("<b>ɴᴏᴡ ꜱᴇɴᴅ ᴛʜᴇ ᴛʜᴜᴍʙ ᴜʀʟ ᴇɢ »</b> https://graph.org/file/13a89d77002442255efad-989ac290c1b3f13b44.jpg\n\n<b>ᴏʀ ɪꜰ ᴅᴏɴ'ᴛ ᴡᴀɴᴛ ᴛʜᴜᴍʙɴᴀɪʟ ꜱᴇɴᴅ = ɴᴏ</b>")
+    await editable.edit("<b>ɴᴏᴡ ꜱᴇɴᴅ ᴛʜᴇ ᴛʜᴜᴍʙ ᴜʀʟ ᴇɢ »</b> https://files.catbox.moe/zgfhrn.jpg\n\n<b>ᴏʀ ɪꜰ ᴅᴏɴ'ᴛ ᴡᴀɴᴛ ᴛʜᴜᴍʙɴᴀɪʟ ꜱᴇɴᴅ = ɴᴏ</b>")
     input6 = message = await bot.listen(editable.chat.id)
     raw_text6 = input6.text
     await input6.delete(True)
     await editable.delete()
 
-    thumb = input6.text.strip()  # Strip whitespace
-    print(f"Received thumbnail input: {thumb}")  # Debug logging
+    # Fixed thumbnail handling
+    thumb = input6.text.strip()
+    print(f"📸 Thumbnail input received: {thumb}")
 
     if thumb.startswith("http://") or thumb.startswith("https://"):
-    print(f"Using custom thumbnail URL: {thumb}")
-    # Keep the URL as is, send_vid will handle downloading
+    # Keep URL as is - send_vid function will handle downloading
+    print(f"✅ Using custom thumbnail URL: {thumb}")
     elif thumb.lower() == "no":
     thumb = "no"
-    print("No custom thumbnail, will use auto-generated")
+    print("⚡ Using auto-generated thumbnail")
     else:
     thumb = "no"
-    print("Invalid input, defaulting to auto-generated thumbnail")
+    print("⚠️ Invalid input, using auto-generated thumbnail")
    
     failed_count =0
     if len(links) == 1:
