@@ -230,40 +230,98 @@ async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     time.sleep(3)
 
 
+async def download_thumbnail(url, save_path):
+    """Download thumbnail with multiple fallback methods"""
+    
+    # Method 1: Try with aiohttp (with retry)
+    for attempt in range(3):
+        try:
+            connector = aiohttp.TCPConnector(force_close=True, limit=1)
+            timeout = aiohttp.ClientTimeout(total=60, connect=30, sock_read=30)
+            
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                async with session.get(url, headers=headers, allow_redirects=True) as resp:
+                    if resp.status == 200:
+                        content = await resp.read()
+                        async with aiofiles.open(save_path, mode='wb') as f:
+                            await f.write(content)
+                        logging.info(f"✅ Thumbnail downloaded via aiohttp (attempt {attempt + 1})")
+                        return True
+                    else:
+                        logging.warning(f"HTTP {resp.status} on attempt {attempt + 1}")
+        except Exception as e:
+            logging.warning(f"aiohttp attempt {attempt + 1} failed: {e}")
+            await asyncio.sleep(2)
+    
+    # Method 2: Fallback to requests (synchronous but more reliable)
+    try:
+        logging.info("Trying fallback method with requests library...")
+        response = requests.get(url, timeout=30, stream=True, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        if response.status_code == 200:
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            logging.info("✅ Thumbnail downloaded via requests")
+            return True
+    except Exception as e:
+        logging.error(f"Requests method also failed: {e}")
+    
+    # Method 3: Last resort - wget command
+    try:
+        logging.info("Trying last resort method with wget...")
+        result = subprocess.run(
+            ['wget', '-q', '-O', save_path, url],
+            timeout=30,
+            capture_output=True
+        )
+        if result.returncode == 0 and os.path.exists(save_path):
+            logging.info("✅ Thumbnail downloaded via wget")
+            return True
+    except Exception as e:
+        logging.error(f"Wget method also failed: {e}")
+    
+    return False
+
+
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
     # Generate auto thumbnail from video
     subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
     await prog.delete(True)
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
     
-    # ✅ Enhanced thumbnail handling
+    # ✅ Enhanced thumbnail handling with multiple fallback methods
     thumbnail = f"{filename}.jpg"  # Default to auto-generated
     downloaded_thumb = None
     
     try:
         if thumb != "no":
             if thumb.startswith("http://") or thumb.startswith("https://"):
-                # Download thumbnail from URL
                 downloaded_thumb = "custom_thumb.jpg"
-                logging.info(f"Downloading thumbnail from: {thumb}")
+                logging.info(f"📸 Downloading thumbnail from: {thumb}")
                 
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(thumb, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                        if resp.status == 200:
-                            async with aiofiles.open(downloaded_thumb, mode='wb') as f:
-                                await f.write(await resp.read())
-                            thumbnail = downloaded_thumb
-                            logging.info("Thumbnail downloaded successfully")
-                        else:
-                            logging.warning(f"Failed to download thumbnail: HTTP {resp.status}")
+                # Try to download with fallback methods
+                success = await download_thumbnail(thumb, downloaded_thumb)
+                
+                if success and os.path.exists(downloaded_thumb):
+                    thumbnail = downloaded_thumb
+                    logging.info("✅ Custom thumbnail set successfully")
+                else:
+                    logging.warning("⚠️ All download methods failed, using auto-generated thumbnail")
+                    
             elif os.path.exists(thumb):
-                # Use local file if it exists
                 thumbnail = thumb
+                logging.info(f"✅ Using local thumbnail: {thumb}")
             else:
-                logging.warning(f"Thumbnail path does not exist: {thumb}")
+                logging.warning(f"⚠️ Thumbnail path does not exist: {thumb}")
     except Exception as e:
-        logging.error(f"Thumbnail error: {e}")
-        thumbnail = f"{filename}.jpg"  # Fallback to auto-generated
+        logging.error(f"❌ Thumbnail error: {e}")
+        thumbnail = f"{filename}.jpg"
 
     dur = int(duration(filename))
     start_time = time.time()
@@ -280,9 +338,9 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
             progress=progress_bar, 
             progress_args=(reply, start_time)
         )
-        logging.info(f"Video uploaded successfully: {name}")
+        logging.info(f"✅ Video uploaded successfully: {name}")
     except Exception as e:
-        logging.error(f"Video upload failed: {e}, falling back to document")
+        logging.error(f"❌ Video upload failed: {e}, falling back to document")
         try:
             await m.reply_document(
                 filename, 
@@ -291,7 +349,7 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
                 progress_args=(reply, start_time)
             )
         except Exception as doc_error:
-            logging.error(f"Document upload also failed: {doc_error}")
+            logging.error(f"❌ Document upload also failed: {doc_error}")
             await m.reply_text(f"❌ Upload failed for: {name}\nError: {str(doc_error)}")
 
     # ✅ Cleanup all files
@@ -302,8 +360,8 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
             os.remove(f"{filename}.jpg")
         if downloaded_thumb and os.path.exists(downloaded_thumb):
             os.remove(downloaded_thumb)
-            logging.info("Custom thumbnail cleaned up")
+            logging.info("🧹 Cleanup completed")
     except Exception as e:
-        logging.error(f"Cleanup error: {e}")
+        logging.error(f"⚠️ Cleanup error: {e}")
     
     await reply.delete(True)
