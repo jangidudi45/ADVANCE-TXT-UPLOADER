@@ -845,7 +845,7 @@ async def upload(bot: Client, m: Message):
                         continue
                 else:
                     Show = (
-                          f"**📥 Status:** `Downloading.`\n\n"
+                          f"**📥 Status:** `Downloading...`\n\n"
                           f"**📊 Progress:** `{count}/{len(links)}`\n"
                           f"━━━━━━━━━━━━━━━━━━\n"
                           f"📁 **{name}**\n"
@@ -855,22 +855,9 @@ async def upload(bot: Client, m: Message):
                           f"└ Thumb: `{input6.text}`\n"
                           f"━━━━━━━━━━━━━━━━━━\n"
                           f"ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
-                    )     
+                      )
                     prog = await m.reply_text(Show)
-
                     res_file = await helper.download_video(url, cmd, name)
-
-                    # 🔐 SAFE CHECK: agar file nahi bani to skip kar do
-                    if not res_file or not os.path.exists(res_file):
-                        await prog.edit_text(
-                            f"❌ Download failed, skipping.\n\n"
-                            f"📁 `{name}`"
-                        )
-                        failed_count += 1
-                        count += 1
-                        await asyncio.sleep(1)
-                        continue
-
                     filename = res_file
                     await prog.delete(True)
                     await helper.send_vid(bot, m, cc, filename, thumb, name, prog)
