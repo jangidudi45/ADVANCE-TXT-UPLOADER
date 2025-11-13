@@ -203,9 +203,7 @@ def save_to_file(video_links, channel_name):
 async def download_video(url, cmd, name):
     global failed_counter
 
-    # ✅ Force fastest possible yt-dlp command with multithreading
     fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
-
     logging.info(f"[Download Attempt] Running command: {fast_cmd}")
     result = subprocess.run(fast_cmd, shell=True)
 
@@ -213,10 +211,13 @@ async def download_video(url, cmd, name):
     for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
         target_file = name + ext
         if os.path.isfile(target_file):
+            logging.info(f"✅ Downloaded file found: {target_file}")
             return target_file
 
-    return name
-
+    # Kuch bhi download nahi hua
+    logging.error(f"❌ No downloaded file found for: {name}")
+    failed_counter += 1
+    return None
 
 async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
@@ -290,10 +291,29 @@ async def download_thumbnail(url, save_path):
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
+    # Agar file exist hi nahi, to turant exit
+    if not os.path.exists(filename):
+        logging.error(f"❌ send_vid called but file does not exist: {filename}")
+        try:
+            await prog.delete(True)
+        except Exception:
+            pass
+        await m.reply_text(f"❌ File not found, skipping:\n`{name}`")
+        return
+
     # Generate auto thumbnail from video
-    subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
+    try:
+        subprocess.run(
+            f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"',
+            shell=True,
+            check=False
+        )
+    except Exception as e:
+        logging.error(f"⚠️ ffmpeg thumbnail error for {filename}: {e}")
+
     await prog.delete(True)
-    reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
+    reply = await m.reply_text(
+        f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
     
     # ✅ Enhanced thumbnail handling with multiple fallback methods
     thumbnail = f"{filename}.jpg"  # Default to auto-generated
