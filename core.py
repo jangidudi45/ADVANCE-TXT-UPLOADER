@@ -23,21 +23,12 @@ import yt_dlp as youtube_dl
 
 
 def duration(filename):
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", filename],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT
-        )
-        out = result.stdout.decode().strip()
-        if not out:
-            logging.warning(f"⚠️ Empty duration output for: {filename}")
-            return 0
-        return float(out)
-    except Exception as e:
-        logging.error(f"❌ duration() failed for {filename}: {e}")
-        return 0
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                             "format=duration", "-of",
+                             "default=noprint_wrappers=1:nokey=1", filename],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT)
+    return float(result.stdout)
 
 
 def exec(cmd):
@@ -212,7 +203,9 @@ def save_to_file(video_links, channel_name):
 async def download_video(url, cmd, name):
     global failed_counter
 
+    # ✅ Force fastest possible yt-dlp command with multithreading
     fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
+
     logging.info(f"[Download Attempt] Running command: {fast_cmd}")
     result = subprocess.run(fast_cmd, shell=True)
 
@@ -220,13 +213,10 @@ async def download_video(url, cmd, name):
     for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
         target_file = name + ext
         if os.path.isfile(target_file):
-            logging.info(f"✅ Downloaded file found: {target_file}")
             return target_file
 
-    # Kuch bhi download nahi hua
-    logging.error(f"❌ No downloaded file found for: {name}")
-    failed_counter += 1
-    return None
+    return name
+
 
 async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
@@ -300,115 +290,10 @@ async def download_thumbnail(url, save_path):
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
-    # 🛡️ 1. File exist check
-    if not os.path.exists(filename):
-        logging.error(f"❌ send_vid called but file does not exist: {filename}")
-        try:
-            await prog.delete(True)
-        except Exception:
-            pass
-        await m.reply_text(f"❌ File not found, skipping:\n`{name}`")
-        return
-
-    # ❌ ffmpeg auto-thumbnail KO HATA DIYA – yahi segfault de raha tha
-    # subprocess.run(...)
-
-    # Status message
-    await prog.delete(True)
-    reply = await m.reply_text(
-        f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
-    )
-
-    # ✅ Thumbnail handling (sirf custom URL/local, auto ffmpeg nahi)
-    thumbnail = None
-    downloaded_thumb = None
-
-    try:
-        if thumb != "no":
-            if thumb.startswith("http://") or thumb.startswith("https://"):
-                downloaded_thumb = "custom_thumb.jpg"
-                logging.info(f"📸 Downloading thumbnail from: {thumb}")
-
-                success = await download_thumbnail(thumb, downloaded_thumb)
-
-                if success and os.path.exists(downloaded_thumb):
-                    thumbnail = downloaded_thumb
-                    logging.info("✅ Custom thumbnail set successfully")
-                else:
-                    logging.warning("⚠️ All download methods failed, sending without thumbnail")
-
-            elif os.path.exists(thumb):
-                thumbnail = thumb
-                logging.info(f"✅ Using local thumbnail: {thumb}")
-            else:
-                logging.warning(f"⚠️ Thumbnail path does not exist: {thumb}")
-    except Exception as e:
-        logging.error(f"❌ Thumbnail error: {e}")
-        thumbnail = None
-
-    # ⏱️ Duration (safe)
-    dur = int(duration(filename)) if duration(filename) else 0
-    start_time = time.time()
-
-    try:
-        await m.reply_video(
-            filename,
-            caption=cc,
-            supports_streaming=True,
-            height=720,
-            width=1280,
-            thumb=thumbnail,
-            duration=dur,
-            progress=progress_bar,
-            progress_args=(reply, start_time),
-        )
-        logging.info(f"✅ Video uploaded successfully: {name}")
-    except Exception as e:
-        logging.error(f"❌ Video upload failed: {e}, falling back to document")
-        try:
-            await m.reply_document(
-                filename,
-                caption=cc,
-                progress=progress_bar,
-                progress_args=(reply, start_time),
-            )
-        except Exception as doc_error:
-            logging.error(f"❌ Document upload also failed: {doc_error}")
-            await m.reply_text(
-                f"❌ Upload failed for: {name}\nError: {str(doc_error)}"
-            )
-
-    # 🧹 Cleanup
-    try:
-        if os.path.exists(filename):
-            os.remove(filename)
-        if downloaded_thumb and os.path.exists(downloaded_thumb):
-            os.remove(downloaded_thumb)
-        logging.info("🧹 Cleanup completed")
-    except Exception as e:
-        logging.error(f"⚠️ Cleanup error: {e}")
-
-    try:
-        await reply.delete(True)
-    except Exception:
-        pass
-
-        await m.reply_text(f"❌ File not found, skipping:\n`{name}`")
-        return
-
     # Generate auto thumbnail from video
-    try:
-        subprocess.run(
-            f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"',
-            shell=True,
-            check=False
-        )
-    except Exception as e:
-        logging.error(f"⚠️ ffmpeg thumbnail error for {filename}: {e}")
-
+    subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
     await prog.delete(True)
-    reply = await m.reply_text(
-        f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
+    reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
     
     # ✅ Enhanced thumbnail handling with multiple fallback methods
     thumbnail = f"{filename}.jpg"  # Default to auto-generated
