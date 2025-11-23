@@ -203,17 +203,34 @@ def save_to_file(video_links, channel_name):
 async def download_video(url, cmd, name):
     global failed_counter
 
-    # ✅ Force fastest possible yt-dlp command with multithreading
-    fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
+    # ✅ Enhanced command with better error handling for m3u8
+    if '.m3u8' in url:
+        # Special handling for HLS streams with better error recovery
+        fast_cmd = f'{cmd} -R 25 --fragment-retries 25 --skip-unavailable-fragments --ignore-errors --no-abort-on-error'
+    else:
+        # Regular command for other URLs
+        fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
 
     logging.info(f"[Download Attempt] Running command: {fast_cmd}")
-    result = subprocess.run(fast_cmd, shell=True)
-
-    # Check for common file outputs
-    for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
-        target_file = name + ext
-        if os.path.isfile(target_file):
-            return target_file
+    
+    try:
+        result = subprocess.run(fast_cmd, shell=True, capture_output=True, text=True, timeout=3600)
+        
+        # Check if download succeeded even with errors
+        for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
+            target_file = name + ext
+            if os.path.isfile(target_file) and os.path.getsize(target_file) > 1024:  # At least 1KB
+                logging.info(f"✅ Download successful: {target_file}")
+                return target_file
+        
+        # If no file found, log error
+        if result.stderr:
+            logging.error(f"Download stderr: {result.stderr[-500:]}")  # Last 500 chars
+            
+    except subprocess.TimeoutExpired:
+        logging.error(f"Download timeout for: {name}")
+    except Exception as e:
+        logging.error(f"Download exception: {e}")
 
     return name
 
@@ -290,17 +307,33 @@ async def download_thumbnail(url, save_path):
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
-    # Generate auto thumbnail from video
-    subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
+    # ✅ Safe thumbnail generation with error handling
+    try:
+        # Check if file exists and is valid
+        if not os.path.exists(filename) or os.path.getsize(filename) < 1024:
+            await prog.delete(True)
+            await m.reply_text(f"❌ Video file is invalid or too small: {name}")
+            return
+            
+        # Generate auto thumbnail with safer ffmpeg command
+        thumb_cmd = f'ffmpeg -i "{filename}" -ss 00:00:05 -vframes 1 -update 1 "{filename}.jpg" -y'
+        thumb_result = subprocess.run(thumb_cmd, shell=True, capture_output=True, timeout=30)
+        
+        # Check if thumbnail was created
+        if not os.path.exists(f"{filename}.jpg"):
+            logging.warning("⚠️ Auto-thumbnail generation failed, will upload without thumb")
+    except Exception as e:
+        logging.error(f"⚠️ Thumbnail generation error: {e}")
+    
     await prog.delete(True)
     reply = await m.reply_text(f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ")
     
     # ✅ Enhanced thumbnail handling with multiple fallback methods
-    thumbnail = f"{filename}.jpg"  # Default to auto-generated
+    thumbnail = f"{filename}.jpg" if os.path.exists(f"{filename}.jpg") else None
     downloaded_thumb = None
     
     try:
-        if thumb != "no":
+        if thumb != "no" and thumb:
             if thumb.startswith("http://") or thumb.startswith("https://"):
                 downloaded_thumb = "custom_thumb.jpg"
                 logging.info(f"📸 Downloading thumbnail from: {thumb}")
@@ -321,23 +354,42 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
                 logging.warning(f"⚠️ Thumbnail path does not exist: {thumb}")
     except Exception as e:
         logging.error(f"❌ Thumbnail error: {e}")
-        thumbnail = f"{filename}.jpg"
 
-    dur = int(duration(filename))
+    # Get duration safely
+    try:
+        dur = int(duration(filename))
+    except:
+        dur = 0
+        logging.warning("⚠️ Could not get video duration")
+
     start_time = time.time()
 
     try:
-        await m.reply_video(
-            filename, 
-            caption=cc, 
-            supports_streaming=True, 
-            height=720, 
-            width=1280,
-            thumb=thumbnail, 
-            duration=dur,
-            progress=progress_bar, 
-            progress_args=(reply, start_time)
-        )
+        # Upload video with or without thumbnail
+        if thumbnail and os.path.exists(thumbnail):
+            await m.reply_video(
+                filename, 
+                caption=cc, 
+                supports_streaming=True, 
+                height=720, 
+                width=1280,
+                thumb=thumbnail, 
+                duration=dur,
+                progress=progress_bar, 
+                progress_args=(reply, start_time)
+            )
+        else:
+            # Upload without thumbnail if generation failed
+            await m.reply_video(
+                filename, 
+                caption=cc, 
+                supports_streaming=True, 
+                height=720, 
+                width=1280,
+                duration=dur,
+                progress=progress_bar, 
+                progress_args=(reply, start_time)
+            )
         logging.info(f"✅ Video uploaded successfully: {name}")
     except Exception as e:
         logging.error(f"❌ Video upload failed: {e}, falling back to document")
