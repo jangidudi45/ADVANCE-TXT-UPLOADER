@@ -91,9 +91,10 @@ async def download_encrypted_video(url, output_filename="video.mp4"):
             'Referer': 'https://sarvamcareerinstitute.in/'
         }
         
-        # Use aiohttp for async download
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=30) as response:
+        # Use aiohttp for async download with increased timeout
+        timeout = aiohttp.ClientTimeout(total=600)  # 10 minutes timeout
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as response:
                 response.raise_for_status()
                 
                 content_type = response.headers.get('Content-Type', '')
@@ -102,11 +103,21 @@ async def download_encrypted_video(url, output_filename="video.mp4"):
                 # If direct video, download it
                 if 'video' in content_type or 'octet-stream' in content_type:
                     print(f"Downloading video to {output_filename}...")
+                    total_size = 0
                     with open(output_filename, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            f.write(chunk)
-                    print(f"✓ Video downloaded successfully: {output_filename}")
-                    return True, output_filename
+                        async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                            if chunk:
+                                f.write(chunk)
+                                total_size += len(chunk)
+                    
+                    print(f"✓ Video downloaded successfully: {output_filename} ({total_size / (1024*1024):.2f} MB)")
+                    
+                    # Verify file exists and has content
+                    if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
+                        return True, output_filename
+                    else:
+                        print(f"❌ File verification failed")
+                        return False, None
                 
                 # If HTML response, try to extract video URL
                 elif 'text/html' in content_type:
@@ -137,17 +148,25 @@ async def download_encrypted_video(url, output_filename="video.mp4"):
                         
                         # Download using ffmpeg for m3u8 or direct download
                         if '.m3u8' in video_url:
-                            print("Detected HLS stream, using ffmpeg...")
-                            return await download_with_ffmpeg_async(video_url, output_filename)
+                            print("Detected HLS stream, using yt-dlp...")
+                            # Use yt-dlp instead of ffmpeg for better compatibility
+                            return await download_with_ytdlp_async(video_url, output_filename)
                         else:
                             print("Downloading video file...")
                             async with session.get(video_url, headers=headers) as vid_response:
                                 vid_response.raise_for_status()
+                                total_size = 0
                                 with open(output_filename, 'wb') as f:
-                                    async for chunk in vid_response.content.iter_chunked(8192):
-                                        f.write(chunk)
-                            print(f"✓ Video downloaded successfully: {output_filename}")
-                            return True, output_filename
+                                    async for chunk in vid_response.content.iter_chunked(1024 * 1024):
+                                        if chunk:
+                                            f.write(chunk)
+                                            total_size += len(chunk)
+                            print(f"✓ Video downloaded successfully: {output_filename} ({total_size / (1024*1024):.2f} MB)")
+                            
+                            if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
+                                return True, output_filename
+                            else:
+                                return False, None
                     else:
                         print("❌ Could not find video URL in response")
                         return False, None
@@ -156,21 +175,29 @@ async def download_encrypted_video(url, output_filename="video.mp4"):
                     print(f"❌ Unexpected content type: {content_type}")
                     return False, None
                     
+    except asyncio.TimeoutError:
+        print(f"❌ Download timeout for encrypted video")
+        return False, None
     except Exception as e:
-        print(f"❌ Error downloading encrypted video: {e}")
+        print(f"❌ Error downloading encrypted video: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False, None
 
-async def download_with_ffmpeg_async(url, output_filename):
-    """Download video using ffmpeg (for HLS streams) - async version"""
+async def download_with_ytdlp_async(url, output_filename):
+    """Download video using yt-dlp (for HLS streams and other formats) - async version"""
     try:
-        print("Downloading with ffmpeg...")
+        print("Downloading with yt-dlp...")
+        # Remove extension for yt-dlp
+        name_without_ext = output_filename.replace('.mp4', '')
+        
         cmd = [
-            'ffmpeg',
-            '-i', url,
-            '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc',
-            output_filename,
-            '-y'
+            'yt-dlp',
+            '-f', 'best',
+            '-o', f'{name_without_ext}.mp4',
+            url,
+            '--no-warnings',
+            '--no-check-certificate'
         ]
         
         process = await asyncio.create_subprocess_exec(
@@ -179,20 +206,20 @@ async def download_with_ffmpeg_async(url, output_filename):
             stderr=asyncio.subprocess.PIPE
         )
         
-        await process.communicate()
+        stdout, stderr = await process.communicate()
         
-        if process.returncode == 0:
-            print(f"✓ Video downloaded successfully: {output_filename}")
-            return True, output_filename
+        if process.returncode == 0 and os.path.exists(f'{name_without_ext}.mp4'):
+            print(f"✓ Video downloaded successfully: {name_without_ext}.mp4")
+            return True, f'{name_without_ext}.mp4'
         else:
-            print(f"❌ ffmpeg error: return code {process.returncode}")
+            print(f"❌ yt-dlp error: {stderr.decode()}")
             return False, None
         
     except FileNotFoundError:
-        print("❌ ffmpeg not found. Please install ffmpeg")
+        print("❌ yt-dlp not found. Please install yt-dlp")
         return False, None
     except Exception as e:
-        print(f"❌ ffmpeg error: {e}")
+        print(f"❌ yt-dlp error: {e}")
         return False, None
 
 def is_encrypted_url(url):
