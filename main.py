@@ -165,6 +165,65 @@ async def restart_handler(_, m):
     await m.reply_text("🔮Restarted🔮", True)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
+# Function to handle encrypted serve_videouweb.php URLs
+async def handle_encrypted_video_url(url, name, raw_text2):
+    """Handle sarvamcareerinstitute.in encrypted video URLs"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://sarvamcareerinstitute.in/'
+        }
+        
+        # Try to get the actual video URL
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        content_type = response.headers.get('Content-Type', '')
+        
+        # If HTML response, try to extract video URL
+        if 'text/html' in content_type:
+            html_content = response.text
+            
+            # Look for video source URLs
+            video_patterns = [
+                r'<source[^>]+src=[\'"](.*?)[\'"]',
+                r'<video[^>]+src=[\'"](.*?)[\'"]',
+                r'src:\s*[\'"]([^\'"]+\.m3u8[^\'"]*)[\'"]',
+                r'file:\s*[\'"]([^\'"]+)[\'"]',
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                matches = re.findall(pattern, html_content, re.IGNORECASE)
+                if matches:
+                    video_url = matches[0]
+                    break
+            
+            if video_url:
+                # Make absolute URL if relative
+                if not video_url.startswith('http'):
+                    base_url = url.rsplit('/', 1)[0]
+                    video_url = urllib.parse.urljoin(base_url, video_url)
+                
+                # Use appropriate download method
+                if '.m3u8' in video_url:
+                    ytf = f"b[height<={raw_text2}]/bv[height<={raw_text2}]+ba/b/bv+ba"
+                    cmd = f'yt-dlp -f "{ytf}" "{video_url}" -o "{name}.mp4"'
+                else:
+                    cmd = f'yt-dlp -o "{name}.mp4" "{video_url}"'
+                
+                return cmd, video_url
+        
+        # If direct video, use original URL
+        if 'video' in content_type or 'octet-stream' in content_type:
+            cmd = f'yt-dlp -o "{name}.mp4" "{url}"'
+            return cmd, url
+            
+        return None, None
+        
+    except Exception as e:
+        print(f"Error handling encrypted URL: {e}")
+        return None, None
 
 COOKIES_FILE_PATH = "youtube_cookies.txt"
 
@@ -596,6 +655,19 @@ async def upload(bot: Client, m: Message):
         for i in range(count - 1, len(links)):
             V = links[i][1].replace("file/d/","uc?export=download&id=").replace("www.youtube-nocookie.com/embed", "youtu.be").replace("?modestbranding=1", "").replace("/view?usp=sharing","") # .replace("mpd","m3u8")
             url = "https://" + V
+
+            # Handle sarvamcareerinstitute.in encrypted URLs
+            if "sarvamcareerinstitute.in/serve_videouweb.php" in url:
+                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
+                name = f'{name1[:60]}'
+                
+                cmd, processed_url = await handle_encrypted_video_url(url, name, raw_text2)
+                if cmd and processed_url:
+                    url = processed_url
+                else:
+                    await m.reply_text(f"<pre><code>⚠️ Failed to process encrypted URL</code></pre>\n⚠️ 𝐓𝐢𝐭𝐥𝐞 » `{name}`")
+                    count += 1
+                    continue            
 
             if "visionias" in url:
                 async with ClientSession() as session:
