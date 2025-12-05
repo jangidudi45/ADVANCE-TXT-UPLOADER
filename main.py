@@ -29,7 +29,7 @@ import cloudscraper
 import m3u8
 import core as helper
 from utils import progress_bar
-from vars import API_ID, API_HASH, BOT_TOKEN, DATABASE_URL # Import DATABASE_URL
+from vars import API_ID, API_HASH, BOT_TOKEN, DATABASE_URL
 from aiohttp import ClientSession
 from pyromod import listen
 from subprocess import getstatusoutput
@@ -43,12 +43,10 @@ from pyrogram.types.messages_and_media import message
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Import the Database class from db.py
-from db import Database, db as db_instance_placeholder # Import db as a placeholder
+from db import Database
 
 cookies_file_path = os.getenv("COOKIES_FILE_PATH", "youtube_cookies.txt")
 
-#pwimg = "https://graph.org/file/8add8d382169e326f67e0-3bf38f92e52955e977.jpg"
-#ytimg = "https://graph.org/file/3aa806c302ceec62e6264-60ced740281395f68f.jpg"
 cpimg = "https://files.catbox.moe/v9z1n7.jpg"
 
 async def show_random_emojis(message):
@@ -57,22 +55,40 @@ async def show_random_emojis(message):
     return emoji_message
 
 # Define the owner's user ID
-OWNER_ID = 7062964338 # Replace with the actual owner's user ID
+OWNER_ID = 7062964338
 
 # Initialize the database instance globally
-# This will attempt to connect to MongoDB when the bot starts
 try:
     db = Database(DATABASE_URL)
 except Exception as e:
     logging.error(f"Failed to initialize database: {e}")
-    sys.exit(1) # Exit if database connection fails
+    sys.exit(1)
 
 AUTH_CHANNEL = -1002752608747
 
 # Function to check if a user is authorized
-def is_authorized(user_id: int) -> bool:
-    # Check if the user is the owner, in the sudo list (from DB), or the auth channel
-    return user_id == OWNER_ID or db.is_sudo_user(user_id) or user_id == AUTH_CHANNEL
+def is_authorized(message: Message) -> bool:
+    user_id = message.from_user.id if message.from_user else None
+    chat_id = message.chat.id
+    thread_id = message.message_thread_id if hasattr(message, 'message_thread_id') else None
+    
+    # Check if the user is the owner
+    if user_id == OWNER_ID:
+        return True
+    
+    # Check if user is in sudo list
+    if user_id and db.is_sudo_user(user_id):
+        return True
+    
+    # Check if the chat/topic is authorized
+    if db.is_authorized_chat(chat_id, thread_id):
+        return True
+    
+    # Check for auth channel
+    if chat_id == AUTH_CHANNEL:
+        return True
+    
+    return False
 
 bot = Client(
     "bot",
@@ -80,125 +96,172 @@ bot = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN)
 
-# Sudo command to add/remove sudo users
+# Enhanced sudo command to handle topics
 @bot.on_message(filters.command("sudo"))
 async def sudo_command(bot: Client, message: Message):
-    user_id = message.from_user.id # Use from_user.id for the user who sent the command
+    user_id = message.from_user.id
     if user_id != OWNER_ID:
         await message.reply_text("**🚫 You are not authorized to use this command.**")
         return
 
     try:
-        args = message.text.split(" ", 2)
-        if len(args) < 3: # Changed to 3 because we expect /sudo <action> <user_id>
-            await message.reply_text("**Usage:** `/sudo add <user_id>` or `/sudo remove <user_id>`")
+        args = message.text.split()
+        if len(args) < 3:
+            await message.reply_text("**Usage:**\n"
+                                   "`/sudo add <user_id>` - Add user\n"
+                                   "`/sudo add <chat_id>` - Add chat (group/channel)\n"
+                                   "`/sudo add <chat_id/thread_id>` - Add specific topic\n"
+                                   "`/sudo remove <user_id>` - Remove user\n"
+                                   "`/sudo remove <chat_id>` - Remove chat\n"
+                                   "`/sudo remove <chat_id/thread_id>` - Remove topic")
             return
 
         action = args[1].lower()
-        target_user_id = int(args[2])
-        target_username = None
-        if message.reply_to_message and message.reply_to_message.from_user:
-            target_username = message.reply_to_message.from_user.username
-
+        target = args[2]
+        
         if action == "add":
-            if db.add_sudo_user(target_user_id, target_username):
-                await message.reply_text(f"**✅ User `{target_user_id}` added to sudo list.**")
+            # Check if it's a chat/topic format
+            if '/' in target:
+                try:
+                    chat_id, thread_id = db.parse_topic_string(target)
+                    if db.add_topic_auth(chat_id, thread_id):
+                        await message.reply_text(f"**✅ Topic `{target}` added to authorized list.**")
+                    else:
+                        await message.reply_text(f"**⚠️ Topic `{target}` is already authorized.**")
+                except ValueError as e:
+                    await message.reply_text(f"**Error:** {e}")
             else:
-                await message.reply_text(f"**⚠️ User `{target_user_id}` is already in the sudo list.**")
+                # Try to parse as integer (user or chat ID)
+                try:
+                    target_id = int(target)
+                    # Negative IDs are chats, positive are users
+                    if target_id < 0:
+                        if db.add_topic_auth(target_id, None):
+                            await message.reply_text(f"**✅ Chat `{target_id}` added to authorized list.**")
+                        else:
+                            await message.reply_text(f"**⚠️ Chat `{target_id}` is already authorized.**")
+                    else:
+                        if db.add_sudo_user(target_id):
+                            await message.reply_text(f"**✅ User `{target_id}` added to sudo list.**")
+                        else:
+                            await message.reply_text(f"**⚠️ User `{target_id}` is already in the sudo list.**")
+                except ValueError:
+                    await message.reply_text("**Error:** Invalid ID format")
+                    
         elif action == "remove":
-            if target_user_id == OWNER_ID:
-                await message.reply_text("**🚫 The owner cannot be removed from the sudo list.**")
-            elif db.remove_sudo_user(target_user_id):
-                await message.reply_text(f"**✅ User `{target_user_id}` removed from sudo list.**")
+            if '/' in target:
+                try:
+                    chat_id, thread_id = db.parse_topic_string(target)
+                    if db.remove_topic_auth(chat_id, thread_id):
+                        await message.reply_text(f"**✅ Topic `{target}` removed from authorized list.**")
+                    else:
+                        await message.reply_text(f"**⚠️ Topic `{target}` not found in authorized list.**")
+                except ValueError as e:
+                    await message.reply_text(f"**Error:** {e}")
             else:
-                await message.reply_text(f"**⚠️ User `{target_user_id}` is not in the sudo list.**")
+                try:
+                    target_id = int(target)
+                    if target_id < 0:
+                        if db.remove_topic_auth(target_id, None):
+                            await message.reply_text(f"**✅ Chat `{target_id}` removed from authorized list.**")
+                        else:
+                            await message.reply_text(f"**⚠️ Chat `{target_id}` not found in authorized list.**")
+                    else:
+                        if target_id == OWNER_ID:
+                            await message.reply_text("**🚫 The owner cannot be removed from the sudo list.**")
+                        elif db.remove_sudo_user(target_id):
+                            await message.reply_text(f"**✅ User `{target_id}` removed from sudo list.**")
+                        else:
+                            await message.reply_text(f"**⚠️ User `{target_id}` is not in the sudo list.**")
+                except ValueError:
+                    await message.reply_text("**Error:** Invalid ID format")
         else:
-            await message.reply_text("**Usage:** `/sudo add <user_id>` or `/sudo remove <user_id>`")
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID. Please provide a valid integer.")
+            await message.reply_text("**Invalid action. Use 'add' or 'remove'.**")
+            
     except Exception as e:
         await message.reply_text(f"**Error:** {str(e)}")
 
 # Inline keyboard for start command
 keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("🇮🇳ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ🇮🇳" ,url=f"https://t.me/ItsPikachubot") ],
-                    [
-                    InlineKeyboardButton("🔔ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ🔔" ,url="https://t.me/Medicoarmy") ],
-                    [
-                    InlineKeyboardButton("🦋ғᴏʟʟᴏᴡ ᴜs🦋" ,url="https://t.me/Medicoarmy")
-                ],
-            ]
-      )
+    [
+        [
+            InlineKeyboardButton("🇮🇳ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ🇮🇳", url="https://t.me/ItsPikachubot")
+        ],
+        [
+            InlineKeyboardButton("🔔ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ🔔", url="https://t.me/Medicoarmy")
+        ],
+        [
+            InlineKeyboardButton("🦋ғᴏʟʟᴏᴡ ᴜs🦋", url="https://t.me/Medicoarmy")
+        ],
+    ]
+)
 
 # Image URLs for the random image feature
 image_urls = [
     "https://files.catbox.moe/v9z1n7.jpg",
-    # Add more image URLs as needed
 ]
 random_image_url = random.choice(image_urls)
-# Caption for the image
+
 caption = (
-        "**ʜᴇʟʟᴏ👋**\n\n"
-        "➠ **ɪ ᴀᴍ ᴛxᴛ ᴛᴏ ᴠɪᴅᴇᴏ ᴜᴘʟᴏᴀᴅᴇʀ ʙᴏᴛ.**\n"
-        "➠ **ғᴏʀ ᴜsᴇ ᴍᴇ sᴇɴᴅ /txt.\n"
-        "➠ **ғᴏʀ ɢᴜɪᴅᴇ sᴇɴᴅ /help."
+    "**ʜᴇʟʟᴏ👋**\n\n"
+    "➠ **ɪ ᴀᴍ ᴛxᴛ ᴛᴏ ᴠɪᴅᴇᴏ ᴜᴘʟᴏᴀᴅᴇʀ ʙᴏᴛ.**\n"
+    "➠ **ғᴏʀ ᴜsᴇ ᴍᴇ sᴇɴᴅ /txt.\n"
+    "➠ **ғᴏʀ ɢᴜɪᴅᴇ sᴇɴᴅ /help."
 )
 
 # Start command handler
 @bot.on_message(filters.command(["start"]))
 async def start_command(bot: Client, message: Message):
-    await bot.send_photo(chat_id=message.chat.id, photo=random_image_url, caption=caption, reply_markup=keyboard)
+    await bot.send_photo(
+        chat_id=message.chat.id,
+        photo=random_image_url,
+        caption=caption,
+        reply_markup=keyboard,
+        message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
+    )
 
 # Stop command handler
 @bot.on_message(filters.command("stop"))
 async def restart_handler(_, m: Message):
+    if not is_authorized(m):
+        await m.reply_text("**🚫 You are not authorized to use this command.**")
+        return
     await m.reply_text("<b>ꜱᴛᴏᴘᴘᴇᴅ</b>🚦", True)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 @bot.on_message(filters.command("restart"))
-async def restart_handler(_, m):
-    if not is_authorized(m.from_user.id):
+async def restart_handler(_, m: Message):
+    if not is_authorized(m):
         await m.reply_text("**🚫 You are not authorized to use this command.**")
         return
     await m.reply_text("🔮Restarted🔮", True)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
-
 COOKIES_FILE_PATH = "youtube_cookies.txt"
 
 @bot.on_message(filters.command("cookies") & filters.private)
 async def cookies_handler(client: Client, m: Message):
-    if not is_authorized(m.from_user.id):
+    if not is_authorized(m):
         await m.reply_text("🚫 You are not authorized to use this command.")
         return
-    """
-    Command: /cookies
-    Allows any user to upload a cookies file dynamically.
-    """
+    
     await m.reply_text(
         "𝗣𝗹𝗲𝗮𝘀𝗲 𝗨𝗽𝗹𝗼𝗮𝗱 𝗧𝗵𝗲 𝗖𝗼𝗼𝗸𝗶𝗲𝘀 𝗙𝗶𝗹𝗲 (.𝘁𝘅𝘁 𝗳𝗼𝗿𝗺𝗮𝘁).",
         quote=True
     )
 
     try:
-        # Wait for the user to send the cookies file
         input_message: Message = await client.listen(m.chat.id)
-
-        # Validate the uploaded file
+        
         if not input_message.document or not input_message.document.file_name.endswith(".txt"):
             await m.reply_text("Invalid file type. Please upload a .txt file.")
             return
 
-        # Download the cookies file
         downloaded_path = await input_message.download()
-
-        # Read the content of the uploaded file
+        
         with open(downloaded_path, "r") as uploaded_file:
             cookies_content = uploaded_file.read()
 
-        # Replace the content of the target cookies file
         with open(COOKIES_FILE_PATH, "w") as target_file:
             target_file.write(cookies_content)
 
@@ -209,39 +272,34 @@ async def cookies_handler(client: Client, m: Message):
     except Exception as e:
         await m.reply_text(f"⚠️ An error occurred: {str(e)}")
 
-# Define paths for uploaded file and processed file
-# Using tempfile for better handling of temporary files
 import tempfile
 
 @bot.on_message(filters.command('e2t'))
 async def edit_txt(client, message: Message):
-    # Prompt the user to upload the .txt file
+    if not is_authorized(message):
+        await message.reply_text("**🚫 You are not authorized to use this command.**")
+        return
+        
     await message.reply_text(
         "🎉 **Welcome to the .txt File Editor!**\n\n"
         "Please send your `.txt` file containing subjects, links, and topics."
     )
 
-    # Wait for the user to upload the file
     input_message: Message = await bot.listen(message.chat.id)
     if not input_message.document:
         await message.reply_text("🚨 **Error**: Please upload a valid `.txt` file.")
         return
 
-    # Get the file name
     file_name = input_message.document.file_name.lower()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         uploaded_file_path = os.path.join(tmpdir, file_name)
-
-        # Download the file
         uploaded_file = await input_message.download(uploaded_file_path)
 
-        # After uploading the file, prompt the user for the file name or 'd' for default
         await message.reply_text(
             "🔄 **Send your .txt file name, or type 'd' for the default file name.**"
         )
 
-        # Wait for the user's response
         user_response: Message = await bot.listen(message.chat.id)
         if user_response.text:
             user_response_text = user_response.text.strip().lower()
@@ -252,7 +310,6 @@ async def edit_txt(client, message: Message):
         else:
             final_file_name = file_name
 
-        # Read and process the uploaded file
         try:
             with open(uploaded_file, 'r', encoding='utf-8') as f:
                 content = f.readlines()
@@ -260,7 +317,6 @@ async def edit_txt(client, message: Message):
             await message.reply_text(f"🚨 **Error**: Unable to read the file.\n\nDetails: {e}")
             return
 
-        # Parse the content into subjects with links and topics
         subjects = {}
         current_subject = None
         for line in content:
@@ -297,32 +353,19 @@ async def edit_txt(client, message: Message):
         try:
             await message.reply_document(
                 document=final_file_path,
-                caption="📥**ᴇᴅɪᴛᴇᴅ ʙʏ ᴘɪᴋᴀᴄʜᴜ**"
+                caption="📥**ᴇᴅɪᴛᴇᴅ ʙʏ ᴘɪᴋᴀᴄʜᴜ**",
+                message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
             )
         except Exception as e:
             await message.reply_text(f"🚨 **Error**: Unable to send the file.\n\nDetails: {e}")
         finally:
-            pass # tempdir handles cleanup
+            pass
 
-from pytube import Playlist
-import youtube_dl
-
-# --- Configuration ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# --- Utility Functions ---
-
+# YouTube to TXT handler
 def sanitize_filename(name):
-    """
-    Sanitizes a string to create a valid filename.
-    """
     return re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
 
 def get_videos_with_ytdlp(url):
-    """
-    Retrieves video titles and URLs using `yt-dlp`.
-    If a title is not available, only the URL is saved.
-    """
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
@@ -346,10 +389,6 @@ def get_videos_with_ytdlp(url):
         return None, None
 
 def save_to_file(videos, name):
-    """
-    Saves video titles and URLs to a .txt file.
-    If a title is unavailable, only the URL is saved.
-    """
     filename = f"{sanitize_filename(name)}.txt"
     with open(filename, 'w', encoding='utf-8') as file:
         for title, url in videos.items():
@@ -359,19 +398,17 @@ def save_to_file(videos, name):
                 file.write(f"{title}: {url}\n")
     return filename
 
-# --- Bot Command ---
-
 @bot.on_message(filters.command('yt2txt'))
 async def ytplaylist_to_txt(client: Client, message: Message):
-    """
-    Handles the extraction of YouTube playlist/channel videos and sends a .txt file.
-    """
-    user_id = message.chat.id
+    if not is_authorized(message):
+        await message.reply_text("**🚫 You are not authorized to use this command.**")
+        return
+
+    user_id = message.from_user.id
     if user_id != OWNER_ID:
         await message.reply_text("**🚫 You are not authorized to use this command.\n\n🫠 This Command is only for owner.**")
         return
 
-    # Request YouTube URL
     await message.delete()
     editable = await message.reply_text("📥 **Please enter the YouTube Playlist Url :**")
     input_msg = await client.listen(editable.chat.id)
@@ -379,29 +416,45 @@ async def ytplaylist_to_txt(client: Client, message: Message):
     await input_msg.delete()
     await editable.delete()
 
-    # Process the URL
     title, videos = get_videos_with_ytdlp(youtube_url)
     if videos:
         file_name = save_to_file(videos, title)
         await message.reply_document(
             document=file_name,
-            caption=f"`{title}`\n\n<b>📥 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : ᴘɪᴋᴀᴄʜᴜ</b>"
+            caption=f"`{title}`\n\n<b>📥 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : ᴘɪᴋᴀᴄʜᴜ</b>",
+            message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
         )
         os.remove(file_name)
     else:
         await message.reply_text("⚠️ **Unable to retrieve videos. Please check the URL.**")
 
-
-# List users command
-@bot.on_message(filters.command("userlist") & filters.user(OWNER_ID)) # Only owner can see the list
+# List users command - Enhanced to show topics
+@bot.on_message(filters.command("userlist"))
 async def list_users(client: Client, msg: Message):
-    sudo_users = db.get_sudo_users() # Get users from DB
+    if msg.from_user.id != OWNER_ID:
+        await msg.reply_text("**🚫 You are not authorized to use this command.**")
+        return
+        
+    sudo_users = db.get_sudo_users()
+    authorized_chats = db.get_authorized_chats()
+    
+    response = "**SUDO USERS:**\n"
     if sudo_users:
-        users_list = "\n".join([f"User ID : `{user_id}`" for user_id in sudo_users])
-        await msg.reply_text(f"SUDO_USERS :\n{users_list}")
+        response += "\n".join([f"• User ID: `{user_id}`" for user_id in sudo_users])
     else:
-        await msg.reply_text("No sudo users.")
-
+        response += "No sudo users.\n"
+    
+    response += "\n\n**AUTHORIZED CHATS/TOPICS:**\n"
+    if authorized_chats:
+        for chat in authorized_chats:
+            if chat.get('thread_id'):
+                response += f"• Chat: `{chat['chat_id']}` / Topic: `{chat['thread_id']}`\n"
+            else:
+                response += f"• Chat: `{chat['chat_id']}` (General)\n"
+    else:
+        response += "No authorized chats/topics."
+    
+    await msg.reply_text(response)
 
 # Help command
 @bot.on_message(filters.command("help"))
@@ -414,22 +467,56 @@ async def help_command(client: Client, msg: Message):
         "`/cookies` - Upload cookies file🍪\n\n"
         "`/e2t` - Edit txt file📝\n\n"
         "`/yt2txt` - Create txt of yt playlist (owner)🗃️\n\n"
-        "`/sudo add` - Add user or group or channel (owner)🎊\n\n"
-        "`/sudo remove` - Remove user or group or channel (owner)❌\n\n"
-        "`/userlist` - List of sudo user or group or channel📜\n\n"
-
+        "`/sudo add` - Add user/chat/topic (owner)🎊\n\n"
+        "`/sudo remove` - Remove user/chat/topic (owner)❌\n\n"
+        "`/userlist` - List of sudo users/chats/topics📜\n\n"
+        "\n**Topic Support:**\n"
+        "• Add topic: `/sudo add -100123456789/34`\n"
+        "• Add chat: `/sudo add -100123456789`\n"
+        "• Add user: `/sudo add 123456789`"
     )
     await msg.reply_text(help_text)
 
-# Upload command handler
+# Modified send_doc function for topic support
+async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
+    reply = await m.reply_text(
+        f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
+        message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+    )
+    time.sleep(1)
+    start_time = time.time()
+    
+    await bot.send_document(
+        chat_id=m.chat.id,
+        document=ka,
+        caption=cc1,
+        message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+    )
+    
+    count += 1
+    await reply.delete()
+    time.sleep(1)
+    os.remove(ka)
+    time.sleep(3)
+
+# Modified upload command handler with topic support
 @bot.on_message(filters.command(["txt"]))
 async def upload(bot: Client, m: Message):
-    if not is_authorized(m.chat.id): # Use m.chat.id for channel/group, m.from_user.id for private
-        await m.reply_text("**🚫You are not authorized to use this bot.**")
+    if not is_authorized(m):
+        await m.reply_text(
+            "**🚫 You are not authorized to use this bot.**",
+            message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+        )
         return
 
-    editable = await m.reply_text(f"📝<b>ꜱᴇɴᴅ ᴛxᴛ ꜰɪʟᴇ</b>")
-    input: Message = await bot.listen(editable.chat.id)
+    # Get thread_id for all messages in this session
+    thread_id = m.message_thread_id if hasattr(m, 'message_thread_id') else None
+    
+    editable = await m.reply_text(
+        f"📝<b>ꜱᴇɴᴅ ᴛxᴛ ꜰɪʟᴇ</b>",
+        message_thread_id=thread_id
+    )
+    input: Message = await bot.listen(m.chat.id)
     x = await input.download()
     await input.delete(True)
     file_name, ext = os.path.splitext(os.path.basename(x))
@@ -458,11 +545,22 @@ async def upload(bot: Client, m: Message):
                     video_count += 1
         os.remove(x)
     except:
-        await m.reply_text("⚠️ɪɴᴠᴀʟɪᴅ ꜰɪʟᴇ ɪɴᴘᴜᴛ")
+        await m.reply_text(
+            "⚠️ɪɴᴠᴀʟɪᴅ ꜰɪʟᴇ ɪɴᴘᴜᴛ",
+            message_thread_id=thread_id
+        )
         os.remove(x)
         return
 
-    await editable.edit(f"`🔗 <b>ᴛᴏᴛᴀʟ ʟɪɴᴋꜱ ꜰᴏᴜɴᴅ ᴀʀᴇ</b> {len(links)}\n\n🖼️ ɪᴍᴀɢᴇꜱ : {img_count}\n📄 ᴘᴅꜰꜱ : {pdf_count}\n📂 ᴢɪᴘꜱ : {zip_count}\n🎞️ ᴠɪᴅᴇᴏꜱ : {video_count}\n\nꜱᴇɴᴅ ꜰʀᴏᴍ ᴡʜᴇʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ.`")
+    await editable.edit(
+        f"`🔗 <b>ᴛᴏᴛᴀʟ ʟɪɴᴋꜱ ꜰᴏᴜɴᴅ ᴀʀᴇ</b> {len(links)}\n\n"
+        f"🖼️ ɪᴍᴀɢᴇꜱ : {img_count}\n"
+        f"📄 ᴘᴅꜰꜱ : {pdf_count}\n"
+        f"📂 ᴢɪᴘꜱ : {zip_count}\n"
+        f"🎞️ ᴠɪᴅᴇᴏꜱ : {video_count}\n\n"
+        f"ꜱᴇɴᴅ ꜰʀᴏᴍ ᴡʜᴇʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ.`"
+    )
+    
     input0: Message = await bot.listen(editable.chat.id)
     raw_text = input0.text
     await input0.delete(True)
@@ -470,6 +568,7 @@ async def upload(bot: Client, m: Message):
         arg = int(raw_text)
     except:
         arg = 1
+        
     await editable.edit("📚 <b>ᴇɴᴛᴇʀ ʏᴏᴜʀ Bᴀᴛᴄʜ Nᴀᴍᴇ\n\n ꜱᴇɴᴅ `1` ꜰᴏʀ ᴜꜱᴇ ᴅᴇꜰᴀᴜʟᴛ</b> ")
     input1: Message = await bot.listen(editable.chat.id)
     raw_text0 = input1.text
@@ -479,36 +578,29 @@ async def upload(bot: Client, m: Message):
     else:
         b_name = raw_text0
 
-
-    await editable.edit("<b>📸 ᴇɴᴛᴇʀ ʀᴇꜱᴏʟᴜᴛɪᴏɴ 📸</b>\n➤ `144`\n➤ `240`\n➤ `360`\n➤ `480`\n➤ `720`\n➤ `1080`")
+    await editable.edit(
+        "<b>📸 ᴇɴᴛᴇʀ ʀᴇꜱᴏʟᴜᴛɪᴏɴ 📸</b>\n"
+        "➤ `144`\n➤ `240`\n➤ `360`\n➤ `480`\n➤ `720`\n➤ `1080`"
+    )
     input2: Message = await bot.listen(editable.chat.id)
     raw_text2 = input2.text
     await input2.delete(True)
-    try:
-        if raw_text2 == "144":
-            res = "256x144"
-        elif raw_text2 == "240":
-            res = "426x240"
-        elif raw_text2 == "360":
-            res = "640x360"
-        elif raw_text2 == "480":
-            res = "854x480"
-        elif raw_text2 == "720":
-            res = "1280x720"
-        elif raw_text2 == "1080":
-            res = "1920x1080"
-        else:
-            res = "UN"
-    except Exception:
-            res = "UN"
-
-
+    
+    res_map = {
+        "144": "256x144",
+        "240": "426x240",
+        "360": "640x360",
+        "480": "854x480",
+        "720": "1280x720",
+        "1080": "1920x1080"
+    }
+    res = res_map.get(raw_text2, "UN")
 
     await editable.edit("✏️ <b>ᴇɴᴛᴇʀ ʏᴏᴜʀ ɴᴀᴍᴇ</b> \n\n <b>ꜱᴇɴᴅ `1` ꜰᴏʀ ᴜꜱᴇ ᴅᴇꜰᴀᴜʟᴛ</b> ")
     input3: Message = await bot.listen(editable.chat.id)
     raw_text3 = input3.text
     await input3.delete(True)
-    # Default credit message with link
+    
     credit = "️[️](https://t.me/ItsPikachubot)"
     if raw_text3 == '1':
         CR = '[ᴘɪᴋᴀᴄʜᴜ️](https://t.me/ItsPikachubot)'
@@ -517,38 +609,29 @@ async def upload(bot: Client, m: Message):
             text, link = raw_text3.split(',')
             CR = f'[{text.strip()}]({link.strip()})'
         except ValueError:
-            CR = raw_text3  # In case the input is not in the expected format, use the raw text
+            CR = raw_text3
     else:
         CR = credit
-    #highlighter  = f"️ ⁪⁬⁮⁮⁮"
-    #if raw_text3 == 'Robin':
-        #MR = highlighter
-    #else:
-        #MR = raw_text3
 
     await editable.edit("<b>ᴇɴᴛᴇʀ ᴘᴡ ᴛᴏᴋᴇɴ ꜰᴏʀ ᴘᴡ ᴜᴘʟᴏᴀᴅɪɴɢ ᴏʀ ꜱᴇɴᴅ `3` ꜰᴏʀ ᴏᴛʜᴇʀꜱ</b>")
     input4: Message = await bot.listen(editable.chat.id)
     raw_text4 = input4.text
     await input4.delete(True)
-    if raw_text4 == '3': # Changed to string '3' as input from user is text
-        MR = "token" # Assuming 'token' is a default value or needs to be defined
-    else:
-        MR = raw_text4
+    MR = "token" if raw_text4 == '3' else raw_text4
 
-
-
-    await editable.edit("<b>ɴᴏᴡ ꜱᴇɴᴅ ᴛʜᴇ ᴛʜᴜᴍʙ ᴜʀʟ ᴇɢ »</b> https://files.catbox.moe/zgfhrn.jpg\n\n<b>ᴏʀ ɪꜰ ᴅᴏɴ'ᴛ ᴡᴀɴᴛ ᴛʜᴜᴍʙɴᴀɪʟ ꜱᴇɴᴅ = ɴᴏ</b>")
-    input6 = message = await bot.listen(editable.chat.id)
+    await editable.edit(
+        "<b>ɴᴏᴡ ꜱᴇɴᴅ ᴛʜᴇ ᴛʜᴜᴍʙ ᴜʀʟ ᴇɢ »</b> https://files.catbox.moe/zgfhrn.jpg\n\n"
+        "<b>ᴏʀ ɪꜰ ᴅᴏɴ'ᴛ ᴡᴀɴᴛ ᴛʜᴜᴍʙɴᴀɪʟ ꜱᴇɴᴅ = ɴᴏ</b>"
+    )
+    input6 = await bot.listen(editable.chat.id)
     raw_text6 = input6.text
     await input6.delete(True)
     await editable.delete()
 
-    # Fixed thumbnail handling
-    thumb = input6.text.strip()
+    thumb = raw_text6.strip()
     print(f"📸 Thumbnail input received: {thumb}")
 
     if thumb.startswith("http://") or thumb.startswith("https://"):
-        # Keep URL as is - send_vid function will handle downloading
         print(f"✅ Using custom thumbnail URL: {thumb}")
     elif thumb.lower() == "no":
         thumb = "no"
@@ -557,9 +640,9 @@ async def upload(bot: Client, m: Message):
         thumb = "no"
         print("⚠️ Invalid input, using auto-generated thumbnail")
 
-    # ✅ CREATE AND PIN SUMMARY MESSAGE
+    # CREATE AND PIN SUMMARY MESSAGE
     summary_text = (
-       f"╭━━━━━━━━━━━━━━━━━╮\n"
+        f"╭━━━━━━━━━━━━━━━━━╮\n"
         f"┃  📊 **BATCH INFO** 📊  ┃\n"
         f"╰━━━━━━━━━━━━━━━━━╯\n\n"
         f"**Batch Name:** `{b_name}`\n"
@@ -575,18 +658,17 @@ async def upload(bot: Client, m: Message):
     
     pinned_msg = None
     try:
-        # Send the summary message
-        pinned_msg = await m.reply_text(summary_text, disable_web_page_preview=True)
-        
-        # Pin the message (silently without notification spam)
+        pinned_msg = await m.reply_text(
+            summary_text,
+            disable_web_page_preview=True,
+            message_thread_id=thread_id
+        )
         await pinned_msg.pin(disable_notification=False)
-        
-        logging.info(f"✅ Pinned summary message in chat {m.chat.id}")
+        logging.info(f"✅ Pinned summary message in chat {m.chat.id}, topic {thread_id}")
     except Exception as e:
         logging.error(f"⚠️ Failed to pin message: {e}")
-        # Continue even if pinning fails
-   
-    failed_count =0
+
+    failed_count = 0
     if len(links) == 1:
         count = 1
     else:
@@ -700,8 +782,6 @@ async def upload(bot: Client, m: Message):
 
             try:
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
-                #cpw = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv\n\n\n🔗𝗩𝗶𝗱𝗲𝗼 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
-                cyt = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mp4\n\n\n🔗𝗩𝗶𝗱𝗲𝗼 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
                 cpvod = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\n\nTitle : {name1}.({res}).mkv\n\n\n🔗𝗩𝗶𝗱𝗲ᴏ 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
                 cimg = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.jpg\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
                 cczip = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.zip\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
@@ -710,8 +790,13 @@ async def upload(bot: Client, m: Message):
                 if "drive" in url:
                     try:
                         ka = await helper.download(url, name)
-                        copy = await bot.send_document(chat_id=m.chat.id,document=ka, caption=cc1)
-                        count+=1
+                        await bot.send_document(
+                            chat_id=m.chat.id,
+                            document=ka,
+                            caption=cc1,
+                            message_thread_id=thread_id
+                        )
+                        count += 1
                         os.remove(ka)
                         time.sleep(1)
                     except FloodWait as e:
@@ -722,27 +807,22 @@ async def upload(bot: Client, m: Message):
                 elif ".pdf" in url:
                     try:
                         await asyncio.sleep(4)
-        # Replace spaces with %20 in the URL
                         url = url.replace(" ", "%20")
-
-        # Create a cloudscraper session
                         scraper = cloudscraper.create_scraper()
-
-        # Send a GET request to download the PDF
                         response = scraper.get(url)
 
-        # Check if the response status is OK
                         if response.status_code == 200:
-            # Write the PDF content to a file
                             with open(f'{name}.pdf', 'wb') as file:
                                 file.write(response.content)
 
-            # Send the PDF document
                             await asyncio.sleep(4)
-                            copy = await bot.send_document(chat_id=m.chat.id, document=f'{name}.pdf', caption=cc1)
+                            await bot.send_document(
+                                chat_id=m.chat.id,
+                                document=f'{name}.pdf',
+                                caption=cc1,
+                                message_thread_id=thread_id
+                            )
                             count += 1
-
-            # Remove the PDF file after sending
                             os.remove(f'{name}.pdf')
                         else:
                             await m.reply_text(f"Failed to download PDF: {response.status_code} {response.reason}")
@@ -752,77 +832,62 @@ async def upload(bot: Client, m: Message):
                         time.sleep(e.x)
                         continue
 
-                #elif "muftukmall" in url:
-                    #try:
-                        #await bot.send_photo(chat_id=m.chat.id, photo=pwimg, caption=cpw)
-                        #count +=1
-                    #except Exception as e:
-                        #await m.reply_text(str(e))
-                        #time.sleep(1)
-                        #continue
-
-                #elif "youtu" in url:
-                    #try:
-                        #await bot.send_photo(chat_id=m.chat.id, photo=ytimg, caption=cyt)
-                        #count +=1
-                    #except Exception as e:
-                        #await m.reply_text(str(e))
-                        #time.sleep(1)
-                        #continue
-
                 elif "media-cdn.classplusapp.com/drm/" in url:
                     try:
-                        await bot.send_photo(chat_id=m.chat.id, photo=cpimg, caption=cpvod)
-                        count +=1
+                        await bot.send_photo(
+                            chat_id=m.chat.id,
+                            photo=cpimg,
+                            caption=cpvod,
+                            message_thread_id=thread_id
+                        )
+                        count += 1
                     except Exception as e:
                         await m.reply_text(str(e))
                         time.sleep(1)
                         continue
 
-
                 elif any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png"]):
                     try:
-                        await asyncio.sleep(4)  # Use asyncio.sleep for non-blocking sleep
-                        # Replace spaces with %20 in the URL
+                        await asyncio.sleep(4)
                         url = url.replace(" ", "%20")
-
-                        # Create a cloudscraper session for image download
                         scraper = cloudscraper.create_scraper()
-
-                        # Send a GET request to download the image
                         response = scraper.get(url)
 
-                        # Check if the response status is OK
                         if response.status_code == 200:
-                            # Write the image content to a file
-                            with open(f'{name}.jpg', 'wb') as file:  # Save as JPG (or PNG if you want)
+                            with open(f'{name}.jpg', 'wb') as file:
                                 file.write(response.content)
 
-                            # Send the image document
-                            await asyncio.sleep(2)  # Non-blocking sleep
-                            copy = await bot.send_photo(chat_id=m.chat.id, photo=f'{name}.jpg', caption=cimg)
+                            await asyncio.sleep(2)
+                            await bot.send_photo(
+                                chat_id=m.chat.id,
+                                photo=f'{name}.jpg',
+                                caption=cimg,
+                                message_thread_id=thread_id
+                            )
                             count += 1
-
-                            # Remove the image file after sending
                             os.remove(f'{name}.jpg')
-
                         else:
                             await m.reply_text(f"Failed to download Image: {response.status_code} {response.reason}")
 
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(2)  # Use asyncio.sleep for non-blocking sleep
-                        return  # Exit the function to avoid continuation
+                        await asyncio.sleep(2)
+                        return
                     except Exception as e:
                         await m.reply_text(f"An error occurred: {str(e)}")
-                        await asyncio.sleep(4)  # You can replace this with more specific
+                        await asyncio.sleep(4)
 
                 elif ".zip" in url:
                     try:
                         cmd = f'yt-dlp -o "{name}.zip" "{url}"'
                         download_cmd = f"{cmd} -R 25 --fragment-retries 25"
                         os.system(download_cmd)
-                        copy = await bot.send_document(chat_id=m.chat.id, document=f'{name}.zip', caption=cczip)
+                        await bot.send_document(
+                            chat_id=m.chat.id,
+                            document=f'{name}.zip',
+                            caption=cczip,
+                            message_thread_id=thread_id
+                        )
                         count += 1
                         os.remove(f'{name}.zip')
                     except FloodWait as e:
@@ -836,7 +901,12 @@ async def upload(bot: Client, m: Message):
                         cmd = f'yt-dlp -o "{name}.pdf" "{url}"'
                         download_cmd = f"{cmd} -R 25 --fragment-retries 25"
                         os.system(download_cmd)
-                        copy = await bot.send_document(chat_id=m.chat.id, document=f'{name}.pdf', caption=cc1)
+                        await bot.send_document(
+                            chat_id=m.chat.id,
+                            document=f'{name}.pdf',
+                            caption=cc1,
+                            message_thread_id=thread_id
+                        )
                         count += 1
                         os.remove(f'{name}.pdf')
                     except FloodWait as e:
@@ -845,39 +915,45 @@ async def upload(bot: Client, m: Message):
                         continue
                 else:
                     Show = (
-                          f"**📥 Status:** `Downloading...`\n\n"
-                          f"**📊 Progress:** `{count}/{len(links)}`\n"
-                          f"━━━━━━━━━━━━━━━━━━\n"
-                          f"📁 **{name}**\n"
-                          f"├ Format: `{MR}`\n"
-                          f"├ Quality: `{raw_text2}`\n"
-                          f"├ URL: `Secured 🔐`\n"
-                          f"└ Thumb: `{input6.text}`\n"
-                          f"━━━━━━━━━━━━━━━━━━\n"
-                          f"ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
-                      )
-                    prog = await m.reply_text(Show)
+                        f"**📥 Status:** `Downloading...`\n\n"
+                        f"**📊 Progress:** `{count}/{len(links)}`\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"📁 **{name}**\n"
+                        f"├ Format: `{MR}`\n"
+                        f"├ Quality: `{raw_text2}`\n"
+                        f"├ URL: `Secured 🔐`\n"
+                        f"└ Thumb: `{input6.text}`\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
+                    )
+                    prog = await m.reply_text(
+                        Show,
+                        message_thread_id=thread_id
+                    )
                     res_file = await helper.download_video(url, cmd, name)
                     filename = res_file
-                    await prog.delete(True)
-                    await helper.send_vid(bot, m, cc, filename, thumb, name, prog)
+                    await prog.delete()
+                    
+                    # Modified send_vid call for topic support
+                    await send_vid_topic(bot, m, cc, filename, thumb, name, prog, thread_id)
                     count += 1
                     time.sleep(1)
 
             except Exception as e:
-                await m.reply_text(f'⚠️ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ғᴀɪʟᴇᴅ\n\n'
-                                   f'ɴᴀᴍᴇ » `{name}`\n\n'
-                                   f'ᴜʀʟ » <a href="{url}">__**Click Here to See Link**__</a>`')
-
+                await m.reply_text(
+                    f'⚠️ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ғᴀɪʟᴇᴅ\n\n'
+                    f'ɴᴀᴍᴇ » `{name}`\n\n'
+                    f'ᴜʀʟ » <a href="{url}">__**Click Here to See Link**__</a>`',
+                    message_thread_id=thread_id
+                )
                 count += 1
                 failed_count += 1
                 continue
 
-
     except Exception as e:
-        await m.reply_text(e)
+        await m.reply_text(str(e))
 
-    # ✅ UPDATE PINNED MESSAGE AFTER COMPLETION
+    # UPDATE PINNED MESSAGE AFTER COMPLETION
     if pinned_msg:
         try:
             completed_text = (
@@ -900,21 +976,107 @@ async def upload(bot: Client, m: Message):
         except Exception as e:
             logging.error(f"⚠️ Failed to update pinned message: {e}")
     
-    #await m.reply_text("**<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>**")
-    await m.reply_text("<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>\n\n"
-                       f"<b>📌 Bᴀᴛᴄʜ Nᴀᴍᴇ :</b> {b_name}\n\n"
-                       f"╭────────────────\n"
-                       f"├ 🔗 ᴛᴏᴛᴀʟ ᴜʀʟꜱ : <code>{len(links)}</code>\n"
-                       f"├ ❌ ꜰᴀɪʟᴇᴅ : <code>{failed_count}</code>\n"
-                       f"├ 🎞️ ᴠɪᴅᴇᴏꜱ : <code>{video_count}</code>\n"
-                       f"├ 📕 ᴘᴅꜰꜱ : <code>{pdf_count}</code>\n"
-                       f"├ 🖼️ ɪᴍᴀɢᴇꜱ : <code>{img_count}</code>\n"
-                       f"├ 📂 ᴢɪᴘꜱ : <code>{zip_count}</code>\n"
-                       f"╰────────────────\n\n"
-                       f"<b>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ :</b> {CR}")
+    await m.reply_text(
+        "<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>\n\n"
+        f"<b>📌 Bᴀᴛᴄʜ Nᴀᴍᴇ :</b> {b_name}\n\n"
+        f"╭────────────────\n"
+        f"├ 🔗 ᴛᴏᴛᴀʟ ᴜʀʟꜱ : <code>{len(links)}</code>\n"
+        f"├ ❌ ꜰᴀɪʟᴇᴅ : <code>{failed_count}</code>\n"
+        f"├ 🎞️ ᴠɪᴅᴇᴏꜱ : <code>{video_count}</code>\n"
+        f"├ 📕 ᴘᴅꜰꜱ : <code>{pdf_count}</code>\n"
+        f"├ 🖼️ ɪᴍᴀɢᴇꜱ : <code>{img_count}</code>\n"
+        f"├ 📂 ᴢɪᴘꜱ : <code>{zip_count}</code>\n"
+        f"╰────────────────\n\n"
+        f"<b>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ :</b> {CR}",
+        message_thread_id=thread_id
+    )
+
+# Modified send_vid function for topic support
+async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, prog, thread_id=None):
+    # Generate auto thumbnail from video
+    subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:12 -vframes 1 "{filename}.jpg"', shell=True)
+    await prog.delete()
+    
+    reply = await m.reply_text(
+        f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
+        message_thread_id=thread_id
+    )
+    
+    # Enhanced thumbnail handling
+    thumbnail = f"{filename}.jpg"
+    downloaded_thumb = None
+    
+    try:
+        if thumb != "no":
+            if thumb.startswith("http://") or thumb.startswith("https://"):
+                downloaded_thumb = "custom_thumb.jpg"
+                logging.info(f"📸 Downloading thumbnail from: {thumb}")
+                
+                success = await helper.download_thumbnail(thumb, downloaded_thumb)
+                
+                if success and os.path.exists(downloaded_thumb):
+                    thumbnail = downloaded_thumb
+                    logging.info("✅ Custom thumbnail set successfully")
+                else:
+                    logging.warning("⚠️ All download methods failed, using auto-generated thumbnail")
+                    
+            elif os.path.exists(thumb):
+                thumbnail = thumb
+                logging.info(f"✅ Using local thumbnail: {thumb}")
+            else:
+                logging.warning(f"⚠️ Thumbnail path does not exist: {thumb}")
+    except Exception as e:
+        logging.error(f"❌ Thumbnail error: {e}")
+        thumbnail = f"{filename}.jpg"
+
+    dur = int(helper.duration(filename))
+    start_time = time.time()
+
+    try:
+        await bot.send_video(
+            chat_id=m.chat.id,
+            video=filename,
+            caption=cc,
+            supports_streaming=True,
+            height=720,
+            width=1280,
+            thumb=thumbnail,
+            duration=dur,
+            progress=progress_bar,
+            progress_args=(reply, start_time),
+            message_thread_id=thread_id
+        )
+        logging.info(f"✅ Video uploaded successfully: {name}")
+    except Exception as e:
+        logging.error(f"❌ Video upload failed: {e}, falling back to document")
+        try:
+            await bot.send_document(
+                chat_id=m.chat.id,
+                document=filename,
+                caption=cc,
+                progress=progress_bar,
+                progress_args=(reply, start_time),
+                message_thread_id=thread_id
+            )
+        except Exception as doc_error:
+            logging.error(f"❌ Document upload also failed: {doc_error}")
+            await m.reply_text(
+                f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
+                message_thread_id=thread_id
+            )
+
+    # Cleanup all files
+    try:
+        if os.path.exists(filename):
+            os.remove(filename)
+        if os.path.exists(f"{filename}.jpg"):
+            os.remove(f"{filename}.jpg")
+        if downloaded_thumb and os.path.exists(downloaded_thumb):
+            os.remove(downloaded_thumb)
+            logging.info("🧹 Cleanup completed")
+    except Exception as e:
+        logging.error(f"⚠️ Cleanup error: {e}")
+    
+    await reply.delete()
 
 bot.run()
-# The main() function is not defined in your original script, so I've commented it out.
-# If you have an async main function, ensure it's properly called.
-# if __name__ == "__main__":
-#     asyncio.run(main())
