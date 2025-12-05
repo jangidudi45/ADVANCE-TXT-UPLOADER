@@ -70,7 +70,7 @@ AUTH_CHANNEL = -1002752608747
 def is_authorized(message: Message) -> bool:
     user_id = message.from_user.id if message.from_user else None
     chat_id = message.chat.id
-    thread_id = message.message_thread_id if hasattr(message, 'message_thread_id') else None
+    thread_id = message.reply_to_message_id if hasattr(message, 'reply_to_message_id') else None
     
     # Check if the user is the owner
     if user_id == OWNER_ID:
@@ -217,7 +217,7 @@ async def start_command(bot: Client, message: Message):
         photo=random_image_url,
         caption=caption,
         reply_markup=keyboard,
-        message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
+        reply_to_message_id=message.reply_to_message_id if hasattr(message, 'reply_to_message_id') else None
     )
 
 # Stop command handler
@@ -354,7 +354,7 @@ async def edit_txt(client, message: Message):
             await message.reply_document(
                 document=final_file_path,
                 caption="📥**ᴇᴅɪᴛᴇᴅ ʙʏ ᴘɪᴋᴀᴄʜᴜ**",
-                message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
+                reply_to_message_id=message.reply_to_message_id if hasattr(message, 'reply_to_message_id') else None
             )
         except Exception as e:
             await message.reply_text(f"🚨 **Error**: Unable to send the file.\n\nDetails: {e}")
@@ -422,7 +422,7 @@ async def ytplaylist_to_txt(client: Client, message: Message):
         await message.reply_document(
             document=file_name,
             caption=f"`{title}`\n\n<b>📥 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : ᴘɪᴋᴀᴄʜᴜ</b>",
-            message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
+            reply_to_message_id=message.reply_to_message_id if hasattr(message, 'reply_to_message_id') else None
         )
         os.remove(file_name)
     else:
@@ -481,7 +481,7 @@ async def help_command(client: Client, msg: Message):
 async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     reply = await m.reply_text(
         f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
-        message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+        reply_to_message_id=m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
     )
     time.sleep(1)
     start_time = time.time()
@@ -490,7 +490,7 @@ async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name
         chat_id=m.chat.id,
         document=ka,
         caption=cc1,
-        message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+        reply_to_message_id=m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
     )
     
     count += 1
@@ -505,16 +505,16 @@ async def upload(bot: Client, m: Message):
     if not is_authorized(m):
         await m.reply_text(
             "**🚫 You are not authorized to use this bot.**",
-            message_thread_id=m.message_thread_id if hasattr(m, 'message_thread_id') else None
+            reply_to_message_id=m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
         )
         return
 
     # Get thread_id for all messages in this session
-    thread_id = m.message_thread_id if hasattr(m, 'message_thread_id') else None
+    thread_id = m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
     
     editable = await m.reply_text(
         f"📝<b>ꜱᴇɴᴅ ᴛxᴛ ꜰɪʟᴇ</b>",
-        message_thread_id=thread_id
+        reply_to_message_id=thread_id
     )
     input: Message = await bot.listen(m.chat.id)
     x = await input.download()
@@ -547,7 +547,7 @@ async def upload(bot: Client, m: Message):
     except:
         await m.reply_text(
             "⚠️ɪɴᴠᴀʟɪᴅ ꜰɪʟᴇ ɪɴᴘᴜᴛ",
-            message_thread_id=thread_id
+            reply_to_message_id=thread_id
         )
         os.remove(x)
         return
@@ -661,7 +661,7 @@ async def upload(bot: Client, m: Message):
         pinned_msg = await m.reply_text(
             summary_text,
             disable_web_page_preview=True,
-            message_thread_id=thread_id
+            reply_to_message_id=thread_id
         )
         await pinned_msg.pin(disable_notification=False)
         logging.info(f"✅ Pinned summary message in chat {m.chat.id}, topic {thread_id}")
@@ -794,7 +794,7 @@ async def upload(bot: Client, m: Message):
                             chat_id=m.chat.id,
                             document=ka,
                             caption=cc1,
-                            message_thread_id=thread_id
+                            reply_to_message_id=thread_id
                         )
                         count += 1
                         os.remove(ka)
@@ -820,7 +820,7 @@ async def upload(bot: Client, m: Message):
                                 chat_id=m.chat.id,
                                 document=f'{name}.pdf',
                                 caption=cc1,
-                                message_thread_id=thread_id
+                                reply_to_message_id=thread_id
                             )
                             count += 1
                             os.remove(f'{name}.pdf')
@@ -838,7 +838,7 @@ async def upload(bot: Client, m: Message):
                             chat_id=m.chat.id,
                             photo=cpimg,
                             caption=cpvod,
-                            message_thread_id=thread_id
+                            reply_to_message_id=thread_id
                         )
                         count += 1
                     except Exception as e:
@@ -862,7 +862,7 @@ async def upload(bot: Client, m: Message):
                                 chat_id=m.chat.id,
                                 photo=f'{name}.jpg',
                                 caption=cimg,
-                                message_thread_id=thread_id
+                                reply_to_message_id=thread_id
                             )
                             count += 1
                             os.remove(f'{name}.jpg')
@@ -886,7 +886,7 @@ async def upload(bot: Client, m: Message):
                             chat_id=m.chat.id,
                             document=f'{name}.zip',
                             caption=cczip,
-                            message_thread_id=thread_id
+                            reply_to_message_id=thread_id
                         )
                         count += 1
                         os.remove(f'{name}.zip')
@@ -905,7 +905,7 @@ async def upload(bot: Client, m: Message):
                             chat_id=m.chat.id,
                             document=f'{name}.pdf',
                             caption=cc1,
-                            message_thread_id=thread_id
+                            reply_to_message_id=thread_id
                         )
                         count += 1
                         os.remove(f'{name}.pdf')
@@ -928,7 +928,7 @@ async def upload(bot: Client, m: Message):
                     )
                     prog = await m.reply_text(
                         Show,
-                        message_thread_id=thread_id
+                        reply_to_message_id=thread_id
                     )
                     res_file = await helper.download_video(url, cmd, name)
                     filename = res_file
@@ -944,7 +944,7 @@ async def upload(bot: Client, m: Message):
                     f'⚠️ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ғᴀɪʟᴇᴅ\n\n'
                     f'ɴᴀᴍᴇ » `{name}`\n\n'
                     f'ᴜʀʟ » <a href="{url}">__**Click Here to See Link**__</a>`',
-                    message_thread_id=thread_id
+                    reply_to_message_id=thread_id
                 )
                 count += 1
                 failed_count += 1
@@ -988,7 +988,7 @@ async def upload(bot: Client, m: Message):
         f"├ 📂 ᴢɪᴘꜱ : <code>{zip_count}</code>\n"
         f"╰────────────────\n\n"
         f"<b>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ :</b> {CR}",
-        message_thread_id=thread_id
+        reply_to_message_id=thread_id
     )
 
 # Modified send_vid function for topic support
@@ -999,7 +999,7 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
     
     reply = await m.reply_text(
         f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
-        message_thread_id=thread_id
+        reply_to_message_id=thread_id
     )
     
     # Enhanced thumbnail handling
@@ -1044,7 +1044,7 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
             duration=dur,
             progress=progress_bar,
             progress_args=(reply, start_time),
-            message_thread_id=thread_id
+            reply_to_message_id=thread_id
         )
         logging.info(f"✅ Video uploaded successfully: {name}")
     except Exception as e:
@@ -1056,13 +1056,13 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
                 caption=cc,
                 progress=progress_bar,
                 progress_args=(reply, start_time),
-                message_thread_id=thread_id
+                reply_to_message_id=thread_id
             )
         except Exception as doc_error:
             logging.error(f"❌ Document upload also failed: {doc_error}")
             await m.reply_text(
                 f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
-                message_thread_id=thread_id
+                reply_to_message_id=thread_id
             )
 
     # Cleanup all files
