@@ -11,6 +11,7 @@ import requests
 import tgcrypto
 import subprocess
 import concurrent.futures
+import re
 
 from utils import progress_bar
 
@@ -20,6 +21,20 @@ from pyrogram.types import Message
 from pytube import Playlist  # Youtube Playlist Extractor
 from yt_dlp import YoutubeDL
 import yt_dlp as youtube_dl
+
+
+def sanitize_filename(filename):
+    """Sanitize filename to remove problematic characters"""
+    # Remove or replace characters that cause issues
+    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+    # Replace multiple spaces with single space
+    filename = re.sub(r'\s+', ' ', filename)
+    # Remove leading/trailing spaces
+    filename = filename.strip()
+    # Limit length to avoid path issues
+    if len(filename) > 200:
+        filename = filename[:200]
+    return filename
 
 
 def duration(filename):
@@ -201,19 +216,132 @@ def save_to_file(video_links, channel_name):
 
 
 async def download_video(url, cmd, name):
+    """Enhanced download function with better m3u8 support"""
     global failed_counter
 
-    fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
+    # Sanitize the output filename
+    safe_name = sanitize_filename(name)
+    
+    # Check if it's an m3u8 URL
+    is_m3u8 = '.m3u8' in url.lower()
+    
+    if is_m3u8:
+        logging.info(f"🎬 Detected m3u8 stream: {url}")
+        
+        # Enhanced yt-dlp command for m3u8 with better options
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': f'{safe_name}.%(ext)s',
+            'retries': 25,
+            'fragment_retries': 25,
+            'skip_unavailable_fragments': True,
+            'keep_fragments': False,
+            'buffersize': 1024 * 1024 * 4,  # 4MB buffer
+            'http_chunk_size': 1024 * 1024 * 2,  # 2MB chunks
+            'concurrent_fragment_downloads': 16,
+            'noprogress': True,
+            'no_warnings': False,
+            'ignoreerrors': False,
+            'nocheckcertificate': True,
+            'prefer_ffmpeg': True,
+            'keepvideo': False,
+            'merge_output_format': 'mp4',
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+            'quiet': False,
+            'no_color': True,
+        }
+        
+        try:
+            logging.info(f"[M3U8 Download] Starting download with yt-dlp library")
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                
+                # Find the downloaded file
+                if info:
+                    # Try different possible extensions
+                    for ext in ['.mp4', '.mkv', '.webm', '']:
+                        target_file = f"{safe_name}{ext}"
+                        if os.path.isfile(target_file):
+                            logging.info(f"✅ M3U8 downloaded successfully: {target_file}")
+                            return target_file
+                    
+                    # If not found with safe_name, try with the original filename from info
+                    if 'requested_downloads' in info and info['requested_downloads']:
+                        downloaded_file = info['requested_downloads'][0].get('filepath')
+                        if downloaded_file and os.path.isfile(downloaded_file):
+                            # Rename to expected name
+                            target = f"{safe_name}.mp4"
+                            os.rename(downloaded_file, target)
+                            logging.info(f"✅ Renamed file to: {target}")
+                            return target
+                            
+        except Exception as e:
+            logging.error(f"❌ yt-dlp library method failed: {e}")
+            logging.info("🔄 Trying fallback method with command line...")
+            
+            # Fallback to command line yt-dlp
+            try:
+                fallback_cmd = f'yt-dlp -f "best" "{url}" -o "{safe_name}.%(ext)s" --merge-output-format mp4 --no-check-certificate --concurrent-fragments 16 --retries 25 --fragment-retries 25'
+                
+                logging.info(f"[M3U8 Fallback] Running: {fallback_cmd}")
+                result = subprocess.run(fallback_cmd, shell=True, capture_output=True, text=True, timeout=3600)
+                
+                if result.returncode == 0:
+                    # Check for downloaded file
+                    for ext in ['.mp4', '.mkv', '.webm', '']:
+                        target_file = f"{safe_name}{ext}"
+                        if os.path.isfile(target_file):
+                            logging.info(f"✅ Fallback download successful: {target_file}")
+                            return target_file
+                else:
+                    logging.error(f"❌ Fallback command failed: {result.stderr}")
+                    
+            except subprocess.TimeoutExpired:
+                logging.error("❌ Download timeout after 1 hour")
+            except Exception as e2:
+                logging.error(f"❌ Fallback method also failed: {e2}")
+    
+    else:
+        # For non-m3u8 URLs, use the original fast command with sanitized name
+        # Replace the name in the cmd with safe_name
+        cmd_parts = cmd.split('"')
+        if len(cmd_parts) >= 4:
+            # Update the output template with sanitized name
+            cmd_parts[3] = safe_name
+            cmd = '"'.join(cmd_parts)
+        
+        fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
+        
+        logging.info(f"[Standard Download] Running command: {fast_cmd}")
+        result = subprocess.run(fast_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logging.error(f"❌ Download failed: {result.stderr}")
 
-    logging.info(f"[Download Attempt] Running command: {fast_cmd}")
-    result = subprocess.run(fast_cmd, shell=True)
-
+    # Check for any downloaded file with various extensions
     for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
+        target_file = safe_name + ext
+        if os.path.isfile(target_file):
+            logging.info(f"✅ Found downloaded file: {target_file}")
+            return target_file
+        
+        # Also check original name
         target_file = name + ext
         if os.path.isfile(target_file):
-            return target_file
+            logging.info(f"✅ Found downloaded file with original name: {target_file}")
+            # Rename to safe name
+            safe_target = safe_name + ext
+            try:
+                os.rename(target_file, safe_target)
+                return safe_target
+            except:
+                return target_file
 
-    return name
+    logging.error(f"❌ No output file found after download attempt")
+    return safe_name
 
 
 async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
