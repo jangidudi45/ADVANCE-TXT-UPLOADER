@@ -11,7 +11,6 @@ import requests
 import tgcrypto
 import subprocess
 import concurrent.futures
-import re
 
 from utils import progress_bar
 
@@ -21,20 +20,6 @@ from pyrogram.types import Message
 from pytube import Playlist  # Youtube Playlist Extractor
 from yt_dlp import YoutubeDL
 import yt_dlp as youtube_dl
-
-
-def sanitize_filename(filename):
-    """Sanitize filename to remove problematic characters"""
-    # Remove or replace characters that cause issues
-    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
-    # Replace multiple spaces with single space
-    filename = re.sub(r'\s+', ' ', filename)
-    # Remove leading/trailing spaces
-    filename = filename.strip()
-    # Limit length to avoid path issues
-    if len(filename) > 200:
-        filename = filename[:200]
-    return filename
 
 
 def duration(filename):
@@ -215,163 +200,74 @@ def save_to_file(video_links, channel_name):
     return filename
 
 
-async def download_m3u8_with_ffmpeg(url, output_file):
-    """Download m3u8 stream using ffmpeg directly"""
-    try:
-        logging.info(f"🎬 Downloading m3u8 with ffmpeg: {url}")
-        
-        # FFmpeg command optimized for m3u8
-        ffmpeg_cmd = [
-            'ffmpeg',
-            '-i', url,
-            '-c', 'copy',  # Copy streams without re-encoding (faster)
-            '-bsf:a', 'aac_adtstoasc',  # Fix AAC stream
-            '-movflags', '+faststart',  # Optimize for streaming
-            '-y',  # Overwrite output file
-            output_file
-        ]
-        
-        logging.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
-        
-        # Run ffmpeg with timeout
-        process = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=3600  # 1 hour timeout
-        )
-        
-        if process.returncode == 0:
-            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                logging.info(f"✅ FFmpeg download successful: {output_file}")
-                return True
-            else:
-                logging.error(f"❌ FFmpeg completed but file not found or empty")
-                return False
-        else:
-            stderr_output = stderr.decode('utf-8', errors='ignore')
-            logging.error(f"❌ FFmpeg failed with return code {process.returncode}")
-            logging.error(f"FFmpeg stderr: {stderr_output}")
-            return False
-            
-    except asyncio.TimeoutError:
-        logging.error("❌ FFmpeg download timeout after 1 hour")
+
+
+def is_m3u8_url(url: str) -> bool:
+    if not url:
         return False
-    except Exception as e:
-        logging.error(f"❌ FFmpeg download error: {e}")
-        return False
+    u = url.lower()
+    return ".m3u8" in u or "manifest.m3u8" in u or u.endswith(".m3u8")
+
+
+def _ffmpeg_headers(headers: dict | None) -> str:
+    """
+    ffmpeg expects headers in a single string separated by \r\n
+    """
+    if not headers:
+        return ""
+    lines = []
+    for k, v in headers.items():
+        if v is None:
+            continue
+        lines.append(f"{k}: {v}")
+    return "\\r\\n".join(lines) + ("\\r\\n" if lines else "")
+
+
+def build_ffmpeg_hls_cmd(url: str, out_file: str, headers: dict | None = None) -> str:
+    # Robust HLS download + remux to MP4
+    hdr = _ffmpeg_headers(headers)
+    hdr_part = f'-headers "{hdr}" ' if hdr else ""
+    return (
+        'ffmpeg -y -hide_banner -loglevel error -stats '
+        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+        '-protocol_whitelist "file,http,https,tcp,tls,crypto" '
+        f'{hdr_part}-i "{url}" '
+        '-c copy -bsf:a aac_adtstoasc -movflags +faststart '
+        f'"{out_file}"'
+    )
 
 
 async def download_video(url, cmd, name):
-    """Enhanced download function with ffmpeg for m3u8 streams"""
-    global failed_counter
+    """
+    Downloads a video using yt-dlp (fast) with retries.
+    If the target is an HLS .m3u8 and yt-dlp fails (common with some CDNs),
+    it falls back to ffmpeg HLS remux download.
+    """
+    fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
 
-    # Sanitize the output filename
-    safe_name = sanitize_filename(name)
-    
-    # Check if it's an m3u8 URL
-    is_m3u8 = '.m3u8' in url.lower()
-    
-    if is_m3u8:
-        logging.info(f"🎬 Detected m3u8 stream: {url}")
-        
-        output_file = f"{safe_name}.mp4"
-        
-        # Try ffmpeg first (most reliable for m3u8)
-        success = await download_m3u8_with_ffmpeg(url, output_file)
-        
-        if success and os.path.exists(output_file):
-            return output_file
-        
-        # Fallback to yt-dlp with different approach
-        logging.info("🔄 FFmpeg failed, trying yt-dlp without format selection...")
-        
-        try:
-            # Don't use -f best for m3u8, let yt-dlp auto-select
-            fallback_cmd = f'yt-dlp "{url}" -o "{safe_name}.%(ext)s" --merge-output-format mp4 --no-check-certificate --retries 25 --fragment-retries 25 --concurrent-fragments 8 --no-part'
-            
-            logging.info(f"[YT-DLP Fallback] Running: {fallback_cmd}")
-            result = subprocess.run(
-                fallback_cmd, 
-                shell=True, 
-                capture_output=True, 
-                text=True, 
-                timeout=3600
-            )
-            
-            if result.returncode == 0:
-                # Check for downloaded file
-                for ext in ['.mp4', '.mkv', '.webm', '']:
-                    target_file = f"{safe_name}{ext}"
-                    if os.path.isfile(target_file):
-                        logging.info(f"✅ YT-DLP download successful: {target_file}")
-                        return target_file
-            else:
-                logging.error(f"❌ YT-DLP failed: {result.stderr}")
-                
-        except subprocess.TimeoutExpired:
-            logging.error("❌ YT-DLP timeout after 1 hour")
-        except Exception as e:
-            logging.error(f"❌ YT-DLP error: {e}")
-        
-        # Last resort: try with streamlink if available
-        try:
-            logging.info("🔄 Trying streamlink as last resort...")
-            streamlink_cmd = f'streamlink "{url}" best -o "{safe_name}.mp4" --force'
-            result = subprocess.run(
-                streamlink_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=3600
-            )
-            
-            if result.returncode == 0 and os.path.exists(f"{safe_name}.mp4"):
-                logging.info(f"✅ Streamlink download successful")
-                return f"{safe_name}.mp4"
-        except:
-            logging.info("Streamlink not available or failed")
-    
-    else:
-        # For non-m3u8 URLs, use the original fast command with sanitized name
-        cmd_parts = cmd.split('"')
-        if len(cmd_parts) >= 4:
-            cmd_parts[3] = safe_name
-            cmd = '"'.join(cmd_parts)
-        
-        fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
-        
-        logging.info(f"[Standard Download] Running command: {fast_cmd}")
-        result = subprocess.run(fast_cmd, shell=True, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logging.error(f"❌ Download failed: {result.stderr}")
+    logging.info(f"[Download Attempt] Running command: {fast_cmd}")
+    subprocess.run(fast_cmd, shell=True)
 
-    # Check for any downloaded file with various extensions
-    for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
-        target_file = safe_name + ext
-        if os.path.isfile(target_file):
-            logging.info(f"✅ Found downloaded file: {target_file}")
-            return target_file
-        
-        # Also check original name
+    # yt-dlp may output different extensions based on source
+    for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm", ".ts"]:
         target_file = name + ext
         if os.path.isfile(target_file):
-            logging.info(f"✅ Found downloaded file with original name: {target_file}")
-            # Rename to safe name
-            safe_target = safe_name + ext
-            try:
-                os.rename(target_file, safe_target)
-                return safe_target
-            except:
-                return target_file
+            return target_file
 
-    logging.error(f"❌ No output file found after download attempt")
-    return safe_name
+    # Fallback: direct HLS via ffmpeg
+    if is_m3u8_url(url) or ".m3u8" in cmd.lower():
+        out_file = f"{name}.mp4"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+        }
+        ff_cmd = build_ffmpeg_hls_cmd(url, out_file, headers=headers)
+        logging.warning(f"[HLS Fallback] yt-dlp failed; trying ffmpeg: {ff_cmd}")
+        subprocess.run(ff_cmd, shell=True)
+
+        if os.path.isfile(out_file):
+            return out_file
+
+    return name
 
 
 async def send_doc(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
