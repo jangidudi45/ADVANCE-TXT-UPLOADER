@@ -215,8 +215,59 @@ def save_to_file(video_links, channel_name):
     return filename
 
 
+async def download_m3u8_with_ffmpeg(url, output_file):
+    """Download m3u8 stream using ffmpeg directly"""
+    try:
+        logging.info(f"🎬 Downloading m3u8 with ffmpeg: {url}")
+        
+        # FFmpeg command optimized for m3u8
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-i', url,
+            '-c', 'copy',  # Copy streams without re-encoding (faster)
+            '-bsf:a', 'aac_adtstoasc',  # Fix AAC stream
+            '-movflags', '+faststart',  # Optimize for streaming
+            '-y',  # Overwrite output file
+            output_file
+        ]
+        
+        logging.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
+        
+        # Run ffmpeg with timeout
+        process = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=3600  # 1 hour timeout
+        )
+        
+        if process.returncode == 0:
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                logging.info(f"✅ FFmpeg download successful: {output_file}")
+                return True
+            else:
+                logging.error(f"❌ FFmpeg completed but file not found or empty")
+                return False
+        else:
+            stderr_output = stderr.decode('utf-8', errors='ignore')
+            logging.error(f"❌ FFmpeg failed with return code {process.returncode}")
+            logging.error(f"FFmpeg stderr: {stderr_output}")
+            return False
+            
+    except asyncio.TimeoutError:
+        logging.error("❌ FFmpeg download timeout after 1 hour")
+        return False
+    except Exception as e:
+        logging.error(f"❌ FFmpeg download error: {e}")
+        return False
+
+
 async def download_video(url, cmd, name):
-    """Enhanced download function with better m3u8 support"""
+    """Enhanced download function with ffmpeg for m3u8 streams"""
     global failed_counter
 
     # Sanitize the output filename
@@ -228,88 +279,67 @@ async def download_video(url, cmd, name):
     if is_m3u8:
         logging.info(f"🎬 Detected m3u8 stream: {url}")
         
-        # Enhanced yt-dlp command for m3u8 with better options
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': f'{safe_name}.%(ext)s',
-            'retries': 25,
-            'fragment_retries': 25,
-            'skip_unavailable_fragments': True,
-            'keep_fragments': False,
-            'buffersize': 1024 * 1024 * 4,  # 4MB buffer
-            'http_chunk_size': 1024 * 1024 * 2,  # 2MB chunks
-            'concurrent_fragment_downloads': 16,
-            'noprogress': True,
-            'no_warnings': False,
-            'ignoreerrors': False,
-            'nocheckcertificate': True,
-            'prefer_ffmpeg': True,
-            'keepvideo': False,
-            'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
-            'quiet': False,
-            'no_color': True,
-        }
+        output_file = f"{safe_name}.mp4"
+        
+        # Try ffmpeg first (most reliable for m3u8)
+        success = await download_m3u8_with_ffmpeg(url, output_file)
+        
+        if success and os.path.exists(output_file):
+            return output_file
+        
+        # Fallback to yt-dlp with different approach
+        logging.info("🔄 FFmpeg failed, trying yt-dlp without format selection...")
         
         try:
-            logging.info(f"[M3U8 Download] Starting download with yt-dlp library")
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                
-                # Find the downloaded file
-                if info:
-                    # Try different possible extensions
-                    for ext in ['.mp4', '.mkv', '.webm', '']:
-                        target_file = f"{safe_name}{ext}"
-                        if os.path.isfile(target_file):
-                            logging.info(f"✅ M3U8 downloaded successfully: {target_file}")
-                            return target_file
-                    
-                    # If not found with safe_name, try with the original filename from info
-                    if 'requested_downloads' in info and info['requested_downloads']:
-                        downloaded_file = info['requested_downloads'][0].get('filepath')
-                        if downloaded_file and os.path.isfile(downloaded_file):
-                            # Rename to expected name
-                            target = f"{safe_name}.mp4"
-                            os.rename(downloaded_file, target)
-                            logging.info(f"✅ Renamed file to: {target}")
-                            return target
-                            
-        except Exception as e:
-            logging.error(f"❌ yt-dlp library method failed: {e}")
-            logging.info("🔄 Trying fallback method with command line...")
+            # Don't use -f best for m3u8, let yt-dlp auto-select
+            fallback_cmd = f'yt-dlp "{url}" -o "{safe_name}.%(ext)s" --merge-output-format mp4 --no-check-certificate --retries 25 --fragment-retries 25 --concurrent-fragments 8 --no-part'
             
-            # Fallback to command line yt-dlp
-            try:
-                fallback_cmd = f'yt-dlp -f "best" "{url}" -o "{safe_name}.%(ext)s" --merge-output-format mp4 --no-check-certificate --concurrent-fragments 16 --retries 25 --fragment-retries 25'
+            logging.info(f"[YT-DLP Fallback] Running: {fallback_cmd}")
+            result = subprocess.run(
+                fallback_cmd, 
+                shell=True, 
+                capture_output=True, 
+                text=True, 
+                timeout=3600
+            )
+            
+            if result.returncode == 0:
+                # Check for downloaded file
+                for ext in ['.mp4', '.mkv', '.webm', '']:
+                    target_file = f"{safe_name}{ext}"
+                    if os.path.isfile(target_file):
+                        logging.info(f"✅ YT-DLP download successful: {target_file}")
+                        return target_file
+            else:
+                logging.error(f"❌ YT-DLP failed: {result.stderr}")
                 
-                logging.info(f"[M3U8 Fallback] Running: {fallback_cmd}")
-                result = subprocess.run(fallback_cmd, shell=True, capture_output=True, text=True, timeout=3600)
-                
-                if result.returncode == 0:
-                    # Check for downloaded file
-                    for ext in ['.mp4', '.mkv', '.webm', '']:
-                        target_file = f"{safe_name}{ext}"
-                        if os.path.isfile(target_file):
-                            logging.info(f"✅ Fallback download successful: {target_file}")
-                            return target_file
-                else:
-                    logging.error(f"❌ Fallback command failed: {result.stderr}")
-                    
-            except subprocess.TimeoutExpired:
-                logging.error("❌ Download timeout after 1 hour")
-            except Exception as e2:
-                logging.error(f"❌ Fallback method also failed: {e2}")
+        except subprocess.TimeoutExpired:
+            logging.error("❌ YT-DLP timeout after 1 hour")
+        except Exception as e:
+            logging.error(f"❌ YT-DLP error: {e}")
+        
+        # Last resort: try with streamlink if available
+        try:
+            logging.info("🔄 Trying streamlink as last resort...")
+            streamlink_cmd = f'streamlink "{url}" best -o "{safe_name}.mp4" --force'
+            result = subprocess.run(
+                streamlink_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=3600
+            )
+            
+            if result.returncode == 0 and os.path.exists(f"{safe_name}.mp4"):
+                logging.info(f"✅ Streamlink download successful")
+                return f"{safe_name}.mp4"
+        except:
+            logging.info("Streamlink not available or failed")
     
     else:
         # For non-m3u8 URLs, use the original fast command with sanitized name
-        # Replace the name in the cmd with safe_name
         cmd_parts = cmd.split('"')
         if len(cmd_parts) >= 4:
-            # Update the output template with sanitized name
             cmd_parts[3] = safe_name
             cmd = '"'.join(cmd_parts)
         
