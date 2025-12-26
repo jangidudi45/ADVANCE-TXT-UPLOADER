@@ -780,7 +780,7 @@ async def upload(bot: Client, m: Message):
             else:
                 # HLS (.m3u8) often doesn't expose height-based formats; let yt-dlp/ffmpeg decide.
                 if ".m3u8" in url.lower():
-                    cmd = f'yt-dlp --downloader ffmpeg --hls-prefer-ffmpeg "{url}" -o "{name}.mp4"'
+                    cmd = f'yt-dlp --downloader ffmpeg --hls-prefer-ffmpeg --hls-use-mpegts "{url}" -o "{name}.mp4"'
                 else:
                     cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
