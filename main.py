@@ -778,11 +778,7 @@ async def upload(bot: Client, m: Message):
                 cmd = f'yt-dlp --cookies youtube_cookies.txt -f "{ytf}" "{url}" -o "{name}".mp4'
 
             else:
-                # HLS (.m3u8) often doesn't expose height-based formats; let yt-dlp/ffmpeg decide.
-                if ".m3u8" in url.lower():
-                    cmd = f'yt-dlp --downloader ffmpeg --hls-prefer-ffmpeg --hls-use-mpegts "{url}" -o "{name}.mp4"'
-                else:
-                    cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
+                cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
             try:
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
