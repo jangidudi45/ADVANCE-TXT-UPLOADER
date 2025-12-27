@@ -14,24 +14,6 @@ import concurrent.futures
 
 from utils import progress_bar
 
-import re
-from pathlib import Path
-
-def sanitize_filename(name: str, max_len: int = 180) -> str:
-    """Make a filesystem-safe filename (keeps Unicode but known-bad chars removed)."""
-    if not name:
-        return "video"
-    name = name.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    # Remove path separators and other illegal chars on common filesystems
-    name = re.sub(r'[\\/:"*?<>|]+', " ", name)
-    # Remove control characters
-    name = re.sub(r"[\x00-\x1f\x7f]", "", name)
-    # Collapse spaces
-    name = re.sub(r"\s+", " ", name).strip()
-    if len(name) > max_len:
-        name = name[:max_len].rstrip()
-    return name or "video"
-
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -218,92 +200,18 @@ def save_to_file(video_links, channel_name):
     return filename
 
 
-
-
-def is_m3u8_url(url: str) -> bool:
-    if not url:
-        return False
-    u = url.lower()
-    return ".m3u8" in u or "manifest.m3u8" in u or u.endswith(".m3u8")
-
-
-def build_ffmpeg_hls_cmd(url: str, out_file: str, user_agent: str | None = None) -> list[str]:
-    """Return ffmpeg argv list for robust HLS download + remux to MP4."""
-    ua = user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-    return [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel", "error",
-        "-stats",
-        "-reconnect", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-        "-user_agent", ua,
-        "-i", url,
-        "-c", "copy",
-        "-bsf:a", "aac_adtstoasc",
-        "-movflags", "+faststart",
-        out_file,
-    ]
-
-
 async def download_video(url, cmd, name):
-    """
-    Downloads a video using yt-dlp.
-    - First tries yt-dlp with sane concurrency (avoids 'I/O operation on closed file' seen with very high fragment concurrency).
-    - If HLS (.m3u8) and yt-dlp fails, falls back to ffmpeg (shell=False, safe args).
-    Returns the final downloaded filepath (or the best-effort name).
-    """
-    base_name = sanitize_filename(name)
-    # keep original directory if provided in name
-    out_dir = os.path.dirname(name) or "."
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    global failed_counter
 
-    # Reduce concurrency: Akamai/KGS m3u8 often breaks with huge --concurrent-fragments
-    fast_cmd = f'{cmd} -R 20 --fragment-retries 20 -N 8 --concurrent-fragments 8 --no-part'
+    fast_cmd = f'{cmd} -R 25 --fragment-retries 25 -N 32 --concurrent-fragments 48'
 
     logging.info(f"[Download Attempt] Running command: {fast_cmd}")
-    try:
-        r = subprocess.run(
-            fast_cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        if r.stdout:
-            logging.info(r.stdout[-4000:])  # last chunk for debugging
-    except Exception as e:
-        logging.exception(f"yt-dlp subprocess failed: {e}")
+    result = subprocess.run(fast_cmd, shell=True)
 
-    # yt-dlp may output different extensions based on source
-    for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm", ".ts"]:
+    for ext in ["", ".webm", ".mp4", ".mkv", ".mp4.webm"]:
         target_file = name + ext
         if os.path.isfile(target_file):
             return target_file
-
-    # Fallback: direct HLS via ffmpeg
-    if is_m3u8_url(url) or ".m3u8" in str(cmd).lower():
-        safe_out = os.path.join(out_dir, sanitize_filename(os.path.basename(base_name)) + ".mp4")
-        ff_argv = build_ffmpeg_hls_cmd(url, safe_out)
-        logging.warning(f"[HLS Fallback] yt-dlp failed; trying ffmpeg argv: {ff_argv}")
-
-        try:
-            r2 = subprocess.run(
-                ff_argv,
-                shell=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            if r2.stdout:
-                logging.info(r2.stdout[-4000:])
-        except Exception as e:
-            logging.exception(f"ffmpeg fallback failed: {e}")
-
-        if os.path.isfile(safe_out) and os.path.getsize(safe_out) > 1024:
-            return safe_out
 
     return name
 
