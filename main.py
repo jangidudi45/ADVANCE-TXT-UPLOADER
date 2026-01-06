@@ -686,7 +686,7 @@ async def upload(bot: Client, m: Message):
                         url = re.search(r"(https://.*?playlist.m3u8.*?)\"", text).group(1)
 
             elif 'media-cdn.classplusapp.com/drm/' in url:
-                url = f"https://kisikaplus-54025091d5df.herokuapp.com/get?url={url}"
+                url = f"https://dragoapi.vercel.app/video/{url}"
 
             elif 'videos.classplusapp' in url:
              url = requests.get(f'https://api.classplusapp.com/cams/uploader/video/jw-signed-url?url={url}', headers={'x-access-token': 'eyJjb3Vyc2VJZCI6IjQ1NjY4NyIsInR1dG9ySWQiOm51bGwsIm9yZ0lkIjo0ODA2MTksImNhdGVnb3J5SWQiOm51bGx9'}).json()['url']
