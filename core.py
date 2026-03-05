@@ -296,6 +296,133 @@ async def download_thumbnail(url, save_path):
     return False
 
 
+def is_vimeo_json_url(url: str) -> bool:
+    """Check if URL is a Vimeo CDN JSON playlist URL (vimeocdn.com/.../playlist.json)"""
+    return "vimeocdn.com" in url and "playlist.json" in url
+
+
+def get_vimeo_base_url(data: dict, playlist_url: str) -> str:
+    """Resolve base URL from Vimeo playlist JSON data"""
+    base_url = data.get("base_url", "")
+    if not base_url.startswith("http"):
+        base = "/".join(playlist_url.split("?")[0].split("/")[:-1]) + "/"
+        base_url = base + base_url
+    return base_url
+
+
+def _download_vimeo_segment(args):
+    """Download a single Vimeo segment (for use in ThreadPoolExecutor)"""
+    import requests as req
+    idx, seg_url, headers = args
+    r = req.get(seg_url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return idx, r.content
+
+
+def _download_vimeo_stream(base_url: str, stream: dict, output_file: str, stream_type: str = "video", workers: int = 16):
+    """Download all segments of a Vimeo stream (video or audio) using parallel threads"""
+    import base64
+    import requests as req
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://vimeo.com/"
+    }
+
+    stream_base = base_url + stream.get("base_url", "")
+    init_segment = stream.get("init_segment")
+    segments = stream.get("segments", [])
+    total = len(segments)
+
+    logging.info(f"[Vimeo] Downloading {stream_type} ({total} segments) with {workers} threads...")
+
+    tasks = [(i, stream_base + seg["url"], headers) for i, seg in enumerate(segments)]
+    results = [None] * total
+    completed = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_download_vimeo_segment, task): task[0] for task in tasks}
+        for future in concurrent.futures.as_completed(futures):
+            idx, content = future.result()
+            results[idx] = content
+            completed += 1
+
+    with open(output_file, "wb") as f:
+        if init_segment:
+            f.write(base64.b64decode(init_segment))
+        for chunk in results:
+            if chunk:
+                f.write(chunk)
+
+    logging.info(f"[Vimeo] {stream_type} saved: {output_file}")
+
+
+async def download_vimeo_json(playlist_url: str, output_name: str) -> str:
+    """
+    Download video from a Vimeo CDN JSON playlist URL.
+    Returns path to the final merged .mp4 file, or raises Exception on failure.
+    """
+    import requests as req
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://vimeo.com/"
+    }
+
+    logging.info(f"[Vimeo] Fetching playlist: {playlist_url}")
+    response = req.get(playlist_url, headers=headers, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    base_url = get_vimeo_base_url(data, playlist_url)
+
+    video_streams = data.get("video", [])
+    audio_streams = data.get("audio", [])
+
+    if not video_streams:
+        raise Exception("No video streams found in Vimeo playlist JSON")
+
+    best_video = max(video_streams, key=lambda x: x.get("avg_bitrate", 0))
+    best_audio = max(audio_streams, key=lambda x: x.get("avg_bitrate", 0)) if audio_streams else None
+
+    logging.info(f"[Vimeo] Quality: {best_video.get('width')}x{best_video.get('height')} @ {best_video.get('avg_bitrate')} bps")
+
+    safe_name = output_name.replace('"', '').replace("'", "")
+    temp_video = f"{safe_name}_vimeo_video.mp4"
+    temp_audio = f"{safe_name}_vimeo_audio.mp4"
+    final_output = f"{safe_name}.mp4"
+
+    # Run blocking downloads in a thread pool to not block the event loop
+    loop = asyncio.get_event_loop()
+
+    await loop.run_in_executor(
+        None,
+        lambda: _download_vimeo_stream(base_url, best_video, temp_video, "video", 16)
+    )
+
+    if best_audio:
+        await loop.run_in_executor(
+            None,
+            lambda: _download_vimeo_stream(base_url, best_audio, temp_audio, "audio", 8)
+        )
+        # Merge video + audio with ffmpeg
+        logging.info(f"[Vimeo] Merging video + audio → {final_output}")
+        merge_cmd = f'ffmpeg -y -loglevel error -i "{temp_video}" -i "{temp_audio}" -c copy "{final_output}"'
+        result = subprocess.run(merge_cmd, shell=True)
+        if os.path.exists(temp_video):
+            os.remove(temp_video)
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
+        if result.returncode != 0:
+            raise Exception("ffmpeg merge failed for Vimeo download")
+    else:
+        os.rename(temp_video, final_output)
+
+    logging.info(f"[Vimeo] Download complete: {final_output}")
+    return final_output
+
+
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
     thread_id = getattr(m, 'message_thread_id', None)
     
