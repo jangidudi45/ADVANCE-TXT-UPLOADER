@@ -759,6 +759,40 @@ async def upload(bot: Client, m: Message):
                print(f"PART5: {part5}")
                url = f"https://kgs-v4.akamaized.net/kgs-cv/{part3}/{part4}/{part5}"
 
+            # ── Vimeo CDN JSON playlist URLs ──────────────────────────────────
+            if helper.is_vimeo_json_url(url):
+                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
+                name = f'{str(count).zfill(3)}) {name1[:60]}'
+                cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.mp4\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
+                Show = (
+                    f"**📥 Status:** `Downloading (Vimeo)...`\n\n"
+                    f"**📊 Progress:** `{count}/{len(links)}`\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"📁 **{name}**\n"
+                    f"├ Format: `Vimeo JSON`\n"
+                    f"├ Quality: `Best Available`\n"
+                    f"└ Thumb: `{raw_text6}`\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
+                )
+                prog = await m.reply_text(Show, reply_to_message_id=thread_id)
+                try:
+                    filename = await helper.download_vimeo_json(url, name)
+                    await prog.delete()
+                    await send_vid_topic(bot, m, cc, filename, thumb, name, prog, thread_id)
+                    count += 1
+                    video_count += 1
+                except Exception as vimeo_err:
+                    await prog.delete()
+                    await m.reply_text(
+                        f'⚠️ Vimeo ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ғᴀɪʟᴇᴅ\n\nɴᴀᴍᴇ » `{name}`\nᴇʀʀᴏʀ » `{str(vimeo_err)}`',
+                        reply_to_message_id=thread_id
+                    )
+                    count += 1
+                    failed_count += 1
+                continue
+            # ─────────────────────────────────────────────────────────────────
+
             if "youtu" in url:
                 ytf = f"b[height<={raw_text2}][ext=mp4]/bv[height<={raw_text2}][ext=mp4]+ba[ext=m4a]/b[ext=mp4]"
             else:
