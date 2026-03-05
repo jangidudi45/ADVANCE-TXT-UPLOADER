@@ -796,7 +796,7 @@ async def upload(bot: Client, m: Message):
             if helper.is_vimeo_json_url(url):
                 name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
                 name = f'{str(count).zfill(3)}) {name1[:60]}'
-                topic_line_v = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
+                topic_line_v = f"\n\n💠ᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.mp4{topic_line_v}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
                 Show = (
                     f"**📥 Status:** `Downloading (Vimeo)...`\n\n"
@@ -851,7 +851,7 @@ async def upload(bot: Client, m: Message):
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
             try:
-                topic_line = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
+                topic_line = f"\n\n💠ᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
                 cpvod = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n\n🔗𝗩𝗶𝗱𝗲ᴏ 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
                 cimg = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.jpg{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
@@ -1087,8 +1087,8 @@ async def upload(bot: Client, m: Message):
                 index_lines.append(f'• <a href="{topic_url}">{topic_name.upper()}</a>')
 
             index_text = (
-                f"<b>📑 ᴛᴏᴘɪᴄ ɪɴᴅᴇx</b>\n"
-                f"<b>📚 {b_name}</b>\n\n"
+                f"<b>💠ᴛᴏᴘɪᴄ ɪɴᴅᴇx</b>\n"
+                f"<b>📚 Bᴀᴛᴄʜ Nᴀᴍᴇ {b_name}</b>\n\n"
                 + "\n \n".join(index_lines)
             )
 
