@@ -493,7 +493,7 @@ async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name
         f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
         reply_to_message_id=m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
     )
-    time.sleep(1)
+    await asyncio.sleep(1)
     start_time = time.time()
     
     await bot.send_document(
@@ -505,9 +505,9 @@ async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name
     
     count += 1
     await reply.delete()
-    time.sleep(1)
+    await asyncio.sleep(1)
     os.remove(ka)
-    time.sleep(3)
+    await asyncio.sleep(3)
 
 # Modified upload command handler with topic support
 @bot.on_message(filters.command(["txt"]))
@@ -796,7 +796,7 @@ async def upload(bot: Client, m: Message):
             if helper.is_vimeo_json_url(url):
                 name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
                 name = f'{str(count).zfill(3)}) {name1[:60]}'
-                topic_line_v = f"\n\n💠 ᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
+                topic_line_v = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.mp4{topic_line_v}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
                 Show = (
                     f"**📥 Status:** `Downloading (Vimeo)...`\n\n"
@@ -851,7 +851,7 @@ async def upload(bot: Client, m: Message):
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
             try:
-                topic_line = f"\n\n💠 ᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
+                topic_line = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
                 cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
                 cpvod = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n\n🔗𝗩𝗶𝗱𝗲ᴏ 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
                 cimg = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.jpg{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
@@ -871,10 +871,10 @@ async def upload(bot: Client, m: Message):
                             topic_index[current_topic] = sent_msg.id
                         count += 1
                         os.remove(ka)
-                        time.sleep(1)
+                        await asyncio.sleep(1)
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        time.sleep(e.x)
+                        await asyncio.sleep(e.value + 2)
                         continue
 
                 elif ".pdf" in url:
@@ -904,7 +904,7 @@ async def upload(bot: Client, m: Message):
 
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        time.sleep(e.x)
+                        await asyncio.sleep(e.value + 2)
                         continue
 
                 elif "media-cdn.classplusapp.com/drm/" in url:
@@ -920,7 +920,7 @@ async def upload(bot: Client, m: Message):
                         count += 1
                     except Exception as e:
                         await m.reply_text(str(e))
-                        time.sleep(1)
+                        await asyncio.sleep(1)
                         continue
 
                 elif any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png"]):
@@ -973,7 +973,7 @@ async def upload(bot: Client, m: Message):
                         os.remove(f'{name}.zip')
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        time.sleep(e.x)
+                        await asyncio.sleep(e.value + 2)
                         count += 1
                         continue
 
@@ -994,7 +994,7 @@ async def upload(bot: Client, m: Message):
                         os.remove(f'{name}.pdf')
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        time.sleep(e.x)
+                        await asyncio.sleep(e.value + 2)
                         continue
                 else:
                     Show = (
@@ -1022,7 +1022,7 @@ async def upload(bot: Client, m: Message):
                     if current_topic and current_topic not in topic_index and sent_msg:
                         topic_index[current_topic] = sent_msg.id
                     count += 1
-                    time.sleep(1)
+                    await asyncio.sleep(1)
 
             except Exception as e:
                 await m.reply_text(
@@ -1143,38 +1143,53 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
     start_time = time.time()
 
     sent_result = None
-    try:
-        sent_result = await bot.send_video(
-            chat_id=m.chat.id,
-            video=filename,
-            caption=cc,
-            supports_streaming=True,
-            height=720,
-            width=1280,
-            thumb=thumbnail,
-            duration=dur,
-            progress=progress_bar,
-            progress_args=(reply, start_time),
-            reply_to_message_id=thread_id
-        )
-        logging.info(f"✅ Video uploaded successfully: {name}")
-    except Exception as e:
-        logging.error(f"❌ Video upload failed: {e}, falling back to document")
+    for attempt in range(3):
         try:
-            sent_result = await bot.send_document(
+            sent_result = await bot.send_video(
                 chat_id=m.chat.id,
-                document=filename,
+                video=filename,
                 caption=cc,
+                supports_streaming=True,
+                height=720,
+                width=1280,
+                thumb=thumbnail,
+                duration=dur,
                 progress=progress_bar,
                 progress_args=(reply, start_time),
                 reply_to_message_id=thread_id
             )
-        except Exception as doc_error:
-            logging.error(f"❌ Document upload also failed: {doc_error}")
-            await m.reply_text(
-                f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
-                reply_to_message_id=thread_id
-            )
+            logging.info(f"✅ Video uploaded successfully: {name}")
+            break
+        except FloodWait as fw:
+            logging.warning(f"⚠️ FloodWait {fw.value}s on send_video, waiting...")
+            await asyncio.sleep(fw.value + 2)
+        except Exception as e:
+            logging.error(f"❌ Video upload failed: {e}, falling back to document")
+            try:
+                for attempt2 in range(3):
+                    try:
+                        sent_result = await bot.send_document(
+                            chat_id=m.chat.id,
+                            document=filename,
+                            caption=cc,
+                            progress=progress_bar,
+                            progress_args=(reply, start_time),
+                            reply_to_message_id=thread_id
+                        )
+                        break
+                    except FloodWait as fw2:
+                        logging.warning(f"⚠️ FloodWait {fw2.value}s on send_document, waiting...")
+                        await asyncio.sleep(fw2.value + 2)
+            except Exception as doc_error:
+                logging.error(f"❌ Document upload also failed: {doc_error}")
+                await m.reply_text(
+                    f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
+                    reply_to_message_id=thread_id
+                )
+            break
+
+    # Small delay after each upload to avoid flood
+    await asyncio.sleep(3)
 
     # Cleanup all files
     try:
