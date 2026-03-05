@@ -1076,41 +1076,33 @@ async def upload(bot: Client, m: Message):
         reply_to_message_id=thread_id
     )
 
-    # ── Topic Index with inline buttons ──────────────────────────────────────
+    # ── Topic Index as plain hyperlink text ──────────────────────────────────
     if topic_index:
         try:
-            chat_id_for_link = m.chat.id
-            # Build inline keyboard: each topic is a button linking to that message
-            # Telegram deep link format for message: t.me/c/<chat_id_without_-100>/<msg_id>
-            raw_chat_id = str(chat_id_for_link).replace("-100", "")
+            raw_chat_id = str(m.chat.id).replace("-100", "")
 
-            buttons = []
             index_lines = []
             for topic_name, msg_id in topic_index.items():
-                display = topic_name.upper()
-                # Transliterate to smallcaps-style using unicode (optional, keep plain for reliability)
-                btn_url = f"https://t.me/c/{raw_chat_id}/{msg_id}"
-                buttons.append([InlineKeyboardButton(f"• {display}", url=btn_url)])
-                index_lines.append(f"• {display}")
+                topic_url = f"https://t.me/c/{raw_chat_id}/{msg_id}"
+                index_lines.append(f'• <a href="{topic_url}">{topic_name.upper()}</a>')
 
-            # Add Done ✅ button at the bottom — links back to this completion message
-            # We send the index message first, then add Done button pointing to it
             index_text = (
                 f"<b>📑 ᴛᴏᴘɪᴄ ɪɴᴅᴇx</b>\n"
                 f"<b>📚 {b_name}</b>\n\n"
                 + "\n \n".join(index_lines)
             )
 
-            # Done button (callback, bot just deletes/confirms)
-            done_button = [[InlineKeyboardButton("Done ✅", callback_data="index_done")]]
-            all_buttons = buttons + done_button
-
             await m.reply_text(
                 index_text,
-                reply_markup=InlineKeyboardMarkup(all_buttons),
+                disable_web_page_preview=True,
                 reply_to_message_id=thread_id
             )
             logging.info(f"✅ Sent topic index with {len(topic_index)} topics")
+
+            await m.reply_text(
+                "✅ <b>Done</b>",
+                reply_to_message_id=thread_id
+            )
         except Exception as e:
             logging.error(f"⚠️ Failed to send topic index: {e}")
 
