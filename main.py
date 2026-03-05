@@ -1061,20 +1061,7 @@ async def upload(bot: Client, m: Message):
         except Exception as e:
             logging.error(f"⚠️ Failed to update pinned message: {e}")
     
-    await m.reply_text(
-        "<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>\n\n"
-        f"<b>📌 Bᴀᴛᴄʜ Nᴀᴍᴇ :</b> {b_name}\n\n"
-        f"╭────────────────\n"
-        f"├ 🔗 ᴛᴏᴛᴀʟ ᴜʀʟꜱ : <code>{len(links)}</code>\n"
-        f"├ ❌ ꜰᴀɪʟᴇᴅ : <code>{failed_count}</code>\n"
-        f"├ 🎞️ ᴠɪᴅᴇᴏꜱ : <code>{video_count}</code>\n"
-        f"├ 📕 ᴘᴅꜰꜱ : <code>{pdf_count}</code>\n"
-        f"├ 🖼️ ɪᴍᴀɢᴇꜱ : <code>{img_count}</code>\n"
-        f"├ 📂 ᴢɪᴘꜱ : <code>{zip_count}</code>\n"
-        f"╰────────────────\n\n"
-        f"<b>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ :</b> {CR}",
-        reply_to_message_id=thread_id
-    )
+
 
     # ── Topic Index as plain hyperlink text ──────────────────────────────────
     if topic_index:
@@ -1096,13 +1083,9 @@ async def upload(bot: Client, m: Message):
             for topic_name, msg_id in topic_index.items():
                 topic_url = f"https://t.me/c/{raw_chat_id}/{msg_id}"
                 display = to_smallcaps(topic_name)
-                index_lines.append(f'- <a href="{topic_url}">{display}</a>')
+                index_lines.append(f'• <a href="{topic_url}">{display}</a>')
 
-            index_text = (
-                f"<b>💠 ᴛᴏᴘɪᴄ ɪɴᴅᴇx</b>\n"
-                f"<b>📚 Bᴀᴛᴄʜ Nᴀᴍᴇ {b_name}</b>\n\n"
-                + "\n \n".join(index_lines)
-            )
+            index_text = "\n \n".join(index_lines)
 
             await m.reply_text(
                 index_text,
