@@ -477,23 +477,13 @@ async def help_command(client: Client, msg: Message):
     )
     await msg.reply_text(help_text)
 
-# Callback handler for Topic Index "Done ✅" button
-@bot.on_callback_query(filters.regex("^index_done$"))
-async def index_done_callback(client: Client, callback_query):
-    try:
-        await callback_query.answer("✅ Done!", show_alert=False)
-        # Remove inline keyboard from the index message
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-    except Exception as e:
-        logging.error(f"⚠️ index_done callback error: {e}")
-
 # Modified send_doc function for topic support
 async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name):
     reply = await m.reply_text(
         f"<b>📤ᴜᴘʟᴏᴀᴅɪɴɢ📤 »</b> `{name}`\n\nʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ",
         reply_to_message_id=m.reply_to_message_id if hasattr(m, 'reply_to_message_id') else None
     )
-    await asyncio.sleep(1)
+    time.sleep(1)
     start_time = time.time()
     
     await bot.send_document(
@@ -505,9 +495,9 @@ async def send_doc_topic(bot: Client, m: Message, cc, ka, cc1, prog, count, name
     
     count += 1
     await reply.delete()
-    await asyncio.sleep(1)
+    time.sleep(1)
     os.remove(ka)
-    await asyncio.sleep(3)
+    time.sleep(3)
 
 # Modified upload command handler with topic support
 @bot.on_message(filters.command(["txt"]))
@@ -544,20 +534,7 @@ async def upload(bot: Client, m: Message):
         for i in content:
             if "://" in i:
                 url = i.split("://", 1)[1]
-                title_part = i.split("://", 1)[0]
-
-                # Extract [Topic] from title if present
-                topic_match = re.match(r'^\[([^\]]+)\]\s*[-–]?\s*(.*)', title_part)
-                if topic_match:
-                    topic_tag = topic_match.group(1).strip()
-                    clean_title = topic_match.group(2).strip()
-                else:
-                    topic_tag = None
-                    clean_title = title_part.strip()
-
-                # links entry: [clean_title, url_without_scheme, topic_tag]
-                links.append([clean_title, url, topic_tag])
-
+                links.append(i.split("://", 1))
                 if ".pdf" in url:
                     pdf_count += 1
                 elif url.endswith((".png", ".jpeg", ".jpg")):
@@ -692,10 +669,6 @@ async def upload(bot: Client, m: Message):
         logging.error(f"⚠️ Failed to pin message: {e}")
 
     failed_count = 0
-    # topic_index stores: { topic_name: first_message_id_of_that_topic }
-    topic_index = {}   # e.g. {"Physics": 12345, "Chemistry": 12399}
-    last_seen_topic = None
-
     if len(links) == 1:
         count = 1
     else:
@@ -705,7 +678,6 @@ async def upload(bot: Client, m: Message):
         for i in range(count - 1, len(links)):
             V = links[i][1].replace("file/d/","uc?export=download&id=").replace("www.youtube-nocookie.com/embed", "youtu.be").replace("?modestbranding=1", "").replace("/view?usp=sharing","") # .replace("mpd","m3u8")
             url = "https://" + V
-            current_topic = links[i][2] if len(links[i]) > 2 else None
 
             if "visionias" in url:
                 async with ClientSession() as session:
@@ -764,11 +736,6 @@ async def upload(bot: Client, m: Message):
             name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
             name = f'{str(count).zfill(3)}) {name1[:60]}'
 
-            # ── Topic tag: track first message per topic ──────────────────────
-            if current_topic and current_topic != last_seen_topic:
-                last_seen_topic = current_topic
-                # We'll update topic_index with message_id after sending below
-
             #if 'cpvod.testbook' in url:
                 #CPVOD = url.split("/")[-2]
                 #url = requests.get(f'https://extractbot.onrender.com/classplus?link=https://cpvod.testbook.com/{CPVOD}/playlist.m3u8', headers={'x-access-token': 'eyJjb3Vyc2VJZCI6IjQ1NjY4NyIsInR1dG9ySWQiOm51bGwsIm9yZ0lkIjo0ODA2MTksImNhdGVnb3J5SWQiOm51bGx9r'}).json()['url']
@@ -792,43 +759,6 @@ async def upload(bot: Client, m: Message):
                print(f"PART5: {part5}")
                url = f"https://kgs-v4.akamaized.net/kgs-cv/{part3}/{part4}/{part5}"
 
-            # ── Vimeo CDN JSON playlist URLs ──────────────────────────────────
-            if helper.is_vimeo_json_url(url):
-                name1 = links[i][0].replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
-                name = f'{str(count).zfill(3)}) {name1[:60]}'
-                topic_line_v = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
-                cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.mp4{topic_line_v}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
-                Show = (
-                    f"**📥 Status:** `Downloading (Vimeo)...`\n\n"
-                    f"**📊 Progress:** `{count}/{len(links)}`\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"📁 **{name}**\n"
-                    f"├ Format: `Vimeo JSON`\n"
-                    f"├ Quality: `Best Available`\n"
-                    f"└ Thumb: `{raw_text6}`\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"ʙᴏᴛ ᴍᴀᴅᴇ ʙʏ ᴘɪᴋᴀᴄʜᴜ"
-                )
-                prog = await m.reply_text(Show, reply_to_message_id=thread_id)
-                try:
-                    filename = await helper.download_vimeo_json(url, name)
-                    await prog.delete()
-                    sent_msg = await send_vid_topic(bot, m, cc, filename, thumb, name, prog, thread_id)
-                    if current_topic and current_topic not in topic_index and sent_msg:
-                        topic_index[current_topic] = sent_msg.id
-                    count += 1
-                    video_count += 1
-                except Exception as vimeo_err:
-                    await prog.delete()
-                    await m.reply_text(
-                        f'⚠️ Vimeo ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ғᴀɪʟᴇᴅ\n\nɴᴀᴍᴇ » `{name}`\nᴇʀʀᴏʀ » `{str(vimeo_err)}`',
-                        reply_to_message_id=thread_id
-                    )
-                    count += 1
-                    failed_count += 1
-                continue
-            # ─────────────────────────────────────────────────────────────────
-
             if "youtu" in url:
                 ytf = f"b[height<={raw_text2}][ext=mp4]/bv[height<={raw_text2}][ext=mp4]+ba[ext=m4a]/b[ext=mp4]"
             else:
@@ -851,30 +781,27 @@ async def upload(bot: Client, m: Message):
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
             try:
-                topic_line = f"\n\nᴛᴏᴘɪᴄ : {current_topic}" if current_topic else ""
-                cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
-                cpvod = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\n\nTitle : {name1}.({res}).mkv{topic_line}\n\n\n🔗𝗩𝗶𝗱𝗲ᴏ 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
-                cimg = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.jpg{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
-                cczip = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.zip{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
-                cc1 = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.pdf{topic_line}\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
+                cc = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.({res}).mkv\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 Exᴛʀᴀᴄᴛᴇᴅ Bʏ : {CR}**'
+                cpvod = f'**🎬 Vɪᴅ Iᴅ : {str(count).zfill(3)}.\n\n\nTitle : {name1}.({res}).mkv\n\n\n🔗𝗩𝗶𝗱𝗲ᴏ 𝗨𝗿𝗹 ➤ <a href="{url}">__Click Here to Watch Video__</a>\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
+                cimg = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.jpg\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
+                cczip = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.zip\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
+                cc1 = f'**📕 Pᴅꜰ Iᴅ : {str(count).zfill(3)}.\n\nTitle : {name1}.pdf\n\n📚 Bᴀᴛᴄʜ Nᴀᴍᴇ : {b_name}\n\n📇 ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ : {CR}**'
 
                 if "drive" in url:
                     try:
                         ka = await helper.download(url, name)
-                        sent_msg = await bot.send_document(
+                        await bot.send_document(
                             chat_id=m.chat.id,
                             document=ka,
                             caption=cc1,
                             reply_to_message_id=thread_id
                         )
-                        if current_topic and current_topic not in topic_index:
-                            topic_index[current_topic] = sent_msg.id
                         count += 1
                         os.remove(ka)
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(e.value + 2)
+                        time.sleep(e.x)
                         continue
 
                 elif ".pdf" in url:
@@ -889,14 +816,12 @@ async def upload(bot: Client, m: Message):
                                 file.write(response.content)
 
                             await asyncio.sleep(4)
-                            sent_msg = await bot.send_document(
+                            await bot.send_document(
                                 chat_id=m.chat.id,
                                 document=f'{name}.pdf',
                                 caption=cc1,
                                 reply_to_message_id=thread_id
                             )
-                            if current_topic and current_topic not in topic_index:
-                                topic_index[current_topic] = sent_msg.id
                             count += 1
                             os.remove(f'{name}.pdf')
                         else:
@@ -904,23 +829,21 @@ async def upload(bot: Client, m: Message):
 
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(e.value + 2)
+                        time.sleep(e.x)
                         continue
 
                 elif "media-cdn.classplusapp.com/drm/" in url:
                     try:
-                        sent_msg = await bot.send_photo(
+                        await bot.send_photo(
                             chat_id=m.chat.id,
                             photo=cpimg,
                             caption=cpvod,
                             reply_to_message_id=thread_id
                         )
-                        if current_topic and current_topic not in topic_index:
-                            topic_index[current_topic] = sent_msg.id
                         count += 1
                     except Exception as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                         continue
 
                 elif any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png"]):
@@ -935,14 +858,12 @@ async def upload(bot: Client, m: Message):
                                 file.write(response.content)
 
                             await asyncio.sleep(2)
-                            sent_msg = await bot.send_photo(
+                            await bot.send_photo(
                                 chat_id=m.chat.id,
                                 photo=f'{name}.jpg',
                                 caption=cimg,
                                 reply_to_message_id=thread_id
                             )
-                            if current_topic and current_topic not in topic_index:
-                                topic_index[current_topic] = sent_msg.id
                             count += 1
                             os.remove(f'{name}.jpg')
                         else:
@@ -961,19 +882,17 @@ async def upload(bot: Client, m: Message):
                         cmd = f'yt-dlp -o "{name}.zip" "{url}"'
                         download_cmd = f"{cmd} -R 25 --fragment-retries 25"
                         os.system(download_cmd)
-                        sent_msg = await bot.send_document(
+                        await bot.send_document(
                             chat_id=m.chat.id,
                             document=f'{name}.zip',
                             caption=cczip,
                             reply_to_message_id=thread_id
                         )
-                        if current_topic and current_topic not in topic_index:
-                            topic_index[current_topic] = sent_msg.id
                         count += 1
                         os.remove(f'{name}.zip')
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(e.value + 2)
+                        time.sleep(e.x)
                         count += 1
                         continue
 
@@ -982,19 +901,17 @@ async def upload(bot: Client, m: Message):
                         cmd = f'yt-dlp -o "{name}.pdf" "{url}"'
                         download_cmd = f"{cmd} -R 25 --fragment-retries 25"
                         os.system(download_cmd)
-                        sent_msg = await bot.send_document(
+                        await bot.send_document(
                             chat_id=m.chat.id,
                             document=f'{name}.pdf',
                             caption=cc1,
                             reply_to_message_id=thread_id
                         )
-                        if current_topic and current_topic not in topic_index:
-                            topic_index[current_topic] = sent_msg.id
                         count += 1
                         os.remove(f'{name}.pdf')
                     except FloodWait as e:
                         await m.reply_text(str(e))
-                        await asyncio.sleep(e.value + 2)
+                        time.sleep(e.x)
                         continue
                 else:
                     Show = (
@@ -1018,11 +935,9 @@ async def upload(bot: Client, m: Message):
                     await prog.delete()
                     
                     # Modified send_vid call for topic support
-                    sent_msg = await send_vid_topic(bot, m, cc, filename, thumb, name, prog, thread_id)
-                    if current_topic and current_topic not in topic_index and sent_msg:
-                        topic_index[current_topic] = sent_msg.id
+                    await send_vid_topic(bot, m, cc, filename, thumb, name, prog, thread_id)
                     count += 1
-                    await asyncio.sleep(1)
+                    time.sleep(1)
 
             except Exception as e:
                 await m.reply_text(
@@ -1061,45 +976,20 @@ async def upload(bot: Client, m: Message):
         except Exception as e:
             logging.error(f"⚠️ Failed to update pinned message: {e}")
     
-
-
-    # ── Topic Index as plain hyperlink text ──────────────────────────────────
-    if topic_index:
-        try:
-            raw_chat_id = str(m.chat.id).replace("-100", "")
-
-            def to_smallcaps(text):
-                normal = "abcdefghijklmnopqrstuvwxyz"
-                small  = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"
-                result = ""
-                for ch in text.lower():
-                    if ch in normal:
-                        result += small[normal.index(ch)]
-                    else:
-                        result += ch
-                return result
-
-            index_lines = []
-            for topic_name, msg_id in topic_index.items():
-                topic_url = f"https://t.me/c/{raw_chat_id}/{msg_id}"
-                display = to_smallcaps(topic_name)
-                index_lines.append(f'• <a href="{topic_url}">{display}</a>')
-
-            index_text = "\n \n".join(index_lines)
-
-            await m.reply_text(
-                index_text,
-                disable_web_page_preview=True,
-                reply_to_message_id=thread_id
-            )
-            logging.info(f"✅ Sent topic index with {len(topic_index)} topics")
-
-            await m.reply_text(
-                "✅ <b>Done</b>",
-                reply_to_message_id=thread_id
-            )
-        except Exception as e:
-            logging.error(f"⚠️ Failed to send topic index: {e}")
+    await m.reply_text(
+        "<b>✨ ᴘʀᴏᴄᴇꜱꜱ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>\n\n"
+        f"<b>📌 Bᴀᴛᴄʜ Nᴀᴍᴇ :</b> {b_name}\n\n"
+        f"╭────────────────\n"
+        f"├ 🔗 ᴛᴏᴛᴀʟ ᴜʀʟꜱ : <code>{len(links)}</code>\n"
+        f"├ ❌ ꜰᴀɪʟᴇᴅ : <code>{failed_count}</code>\n"
+        f"├ 🎞️ ᴠɪᴅᴇᴏꜱ : <code>{video_count}</code>\n"
+        f"├ 📕 ᴘᴅꜰꜱ : <code>{pdf_count}</code>\n"
+        f"├ 🖼️ ɪᴍᴀɢᴇꜱ : <code>{img_count}</code>\n"
+        f"├ 📂 ᴢɪᴘꜱ : <code>{zip_count}</code>\n"
+        f"╰────────────────\n\n"
+        f"<b>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ :</b> {CR}",
+        reply_to_message_id=thread_id
+    )
 
 # Modified send_vid function for topic support
 async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, prog, thread_id=None):
@@ -1142,54 +1032,38 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
     dur = int(helper.duration(filename))
     start_time = time.time()
 
-    sent_result = None
-    for attempt in range(3):
+    try:
+        await bot.send_video(
+            chat_id=m.chat.id,
+            video=filename,
+            caption=cc,
+            supports_streaming=True,
+            height=720,
+            width=1280,
+            thumb=thumbnail,
+            duration=dur,
+            progress=progress_bar,
+            progress_args=(reply, start_time),
+            reply_to_message_id=thread_id
+        )
+        logging.info(f"✅ Video uploaded successfully: {name}")
+    except Exception as e:
+        logging.error(f"❌ Video upload failed: {e}, falling back to document")
         try:
-            sent_result = await bot.send_video(
+            await bot.send_document(
                 chat_id=m.chat.id,
-                video=filename,
+                document=filename,
                 caption=cc,
-                supports_streaming=True,
-                height=720,
-                width=1280,
-                thumb=thumbnail,
-                duration=dur,
                 progress=progress_bar,
                 progress_args=(reply, start_time),
                 reply_to_message_id=thread_id
             )
-            logging.info(f"✅ Video uploaded successfully: {name}")
-            break
-        except FloodWait as fw:
-            logging.warning(f"⚠️ FloodWait {fw.value}s on send_video, waiting...")
-            await asyncio.sleep(fw.value + 2)
-        except Exception as e:
-            logging.error(f"❌ Video upload failed: {e}, falling back to document")
-            try:
-                for attempt2 in range(3):
-                    try:
-                        sent_result = await bot.send_document(
-                            chat_id=m.chat.id,
-                            document=filename,
-                            caption=cc,
-                            progress=progress_bar,
-                            progress_args=(reply, start_time),
-                            reply_to_message_id=thread_id
-                        )
-                        break
-                    except FloodWait as fw2:
-                        logging.warning(f"⚠️ FloodWait {fw2.value}s on send_document, waiting...")
-                        await asyncio.sleep(fw2.value + 2)
-            except Exception as doc_error:
-                logging.error(f"❌ Document upload also failed: {doc_error}")
-                await m.reply_text(
-                    f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
-                    reply_to_message_id=thread_id
-                )
-            break
-
-    # Small delay after each upload to avoid flood
-    await asyncio.sleep(3)
+        except Exception as doc_error:
+            logging.error(f"❌ Document upload also failed: {doc_error}")
+            await m.reply_text(
+                f"❌ Upload failed for: {name}\nError: {str(doc_error)}",
+                reply_to_message_id=thread_id
+            )
 
     # Cleanup all files
     try:
@@ -1204,6 +1078,5 @@ async def send_vid_topic(bot: Client, m: Message, cc, filename, thumb, name, pro
         logging.error(f"⚠️ Cleanup error: {e}")
     
     await reply.delete()
-    return sent_result
 
 bot.run()
